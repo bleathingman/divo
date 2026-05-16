@@ -38,6 +38,9 @@ document.getElementById('web-dark-toggle').addEventListener('change', function()
 document.getElementById('default-browser-btn').addEventListener('click', function() {
   document.title = 'divo-settings-action:set-default-browser'
 })
+document.getElementById('btn-open-extensions').addEventListener('click', function() {
+  document.title = 'divo-settings-action:open-extensions'
+})
 document.getElementById('update-action-btn').addEventListener('click', function() {
   if (this.dataset.state === 'available') {
     document.title = 'divo-settings-action:install-update'

@@ -603,6 +603,10 @@ function wireWebviewEvents(el) {
       if (isSettings(currentUrl)) window.bridge.setDefaultBrowser()
       return
     }
+    if (e.title === 'divo-settings-action:open-extensions') {
+      if (isSettings(currentUrl)) createTab('divo://extensions')
+      return
+    }
     if (e.title === 'divo-settings-action:check-update' && isSettings(currentUrl)) {
       el.executeJavaScript(`
         const b = document.getElementById('update-action-btn');
