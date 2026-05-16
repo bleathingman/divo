@@ -45,7 +45,7 @@ const WEBVIEW_SHORTCUTS = new Set([
 
 // ── Config persistante
 const configPath = path.join(app.getPath('userData'), 'config.json')
-let config = { adblock: true, webDarkMode: false }
+let config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
 try { Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8'))) } catch {}
 function saveConfig() { try { fs.writeFileSync(configPath, JSON.stringify(config)) } catch (e) { console.error('saveConfig error', e) } }
 
@@ -411,6 +411,16 @@ function cspHandler(details, callback) {
 }
 
 function adblockHandler(details, callback) {
+  // HTTPS upgrade — mainFrame uniquement, ignore les adresses locales
+  if (config.httpsUpgrade !== false && details.url.startsWith('http://') && details.resourceType === 'mainFrame') {
+    try {
+      const host = new URL(details.url).hostname
+      if (host !== 'localhost' && !host.startsWith('127.') && !host.startsWith('192.168.')
+          && !host.startsWith('10.') && !host.endsWith('.local')) {
+        callback({ redirectURL: details.url.replace(/^http:/, 'https:') }); return
+      }
+    } catch {}
+  }
   if (!config.adblock || !blockedDomains.size || details.resourceType === 'mainFrame') {
     callback({}); return
   }
@@ -783,7 +793,7 @@ const WEB_DARK_SKIP = [
 // ── Auto-update
 const REPO = 'bleathingman/divo'
 const UPDATE_INTERVAL = 4 * 60 * 60 * 1000
-const ALLOWED_UPDATE_HOSTS = new Set(['github.com', 'objects.githubusercontent.com'])
+const ALLOWED_UPDATE_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'])
 let pendingUpdateUrl     = null
 let pendingUpdateVersion = null
 
@@ -1409,6 +1419,10 @@ ipcMain.handle('pick-download-path', async () => {
   saveConfig()
   return filePaths[0]
 })
+
+// ── HTTPS Upgrade IPC
+ipcMain.handle('https-upgrade-status', () => config.httpsUpgrade !== false)
+ipcMain.handle('https-upgrade-toggle', (_, enabled) => { config.httpsUpgrade = !!enabled; saveConfig(); return config.httpsUpgrade })
 
 // ── Web Dark Mode IPC
 ipcMain.handle('web-dark-mode-status', () => config.webDarkMode)

@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('bridge', {
   pickDownloadPath:   () => ipcRenderer.invoke('pick-download-path'),
   webDarkModeStatus: () => ipcRenderer.invoke('web-dark-mode-status'),
   webDarkModeToggle: (v) => ipcRenderer.invoke('web-dark-mode-toggle', v),
+  httpsUpgradeStatus: () => ipcRenderer.invoke('https-upgrade-status'),
+  httpsUpgradeToggle: (v) => ipcRenderer.invoke('https-upgrade-toggle', v),
   onWebviewShortcut:    (cb) => ipcRenderer.on('webview-shortcut',  (_, d) => cb(d)),
   onUpdateAvailable:    (cb) => ipcRenderer.on('update-available',    (_, d) => cb(d)),
   onUpdateProgress:     (cb) => ipcRenderer.on('update-progress',     (_, p) => cb(p)),

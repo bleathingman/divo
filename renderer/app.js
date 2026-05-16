@@ -189,6 +189,7 @@ let zoomLevel       = 1.0
 let progressTimer   = null
 let historyData     = []
 let sidebarVisible  = true
+let focusMode       = false
 let downloads       = new Map()
 let dragId          = null
 let dragType        = null
@@ -508,6 +509,7 @@ function wireWebviewEvents(el) {
         const aa  = localStorage.getItem('divo-auto-archive')  || 'off'
         const ab  = await window.bridge.adblockStatus()
         const wdm = await window.bridge.webDarkModeStatus()
+        const hu  = await window.bridge.httpsUpgradeStatus()
         const isDefault = await window.bridge.isDefaultBrowser()
         el.executeJavaScript(`
           document.getElementById('search-engine').value    = ${JSON.stringify(se)};
@@ -517,6 +519,8 @@ function wireWebviewEvents(el) {
           document.getElementById('adblock-toggle').checked = ${!!ab};
           const wdt = document.getElementById('web-dark-toggle');
           if (wdt) wdt.checked = ${!!wdm};
+          const hut = document.getElementById('https-upgrade-toggle');
+          if (hut) hut.checked = ${!!hu};
           const defBtn = document.getElementById('default-browser-btn');
           const defStatus = document.getElementById('default-browser-status');
           if (defBtn && defStatus) {
@@ -572,6 +576,7 @@ function wireWebviewEvents(el) {
         if (action.startsWith('theme:'))            applyTheme(action.replace('theme:', ''))
         if (action.startsWith('layout:'))           applyLayout(action.replace('layout:', ''))
         if (action.startsWith('web-dark:'))         window.bridge.webDarkModeToggle(action.endsWith('true'))
+        if (action.startsWith('https-upgrade:'))    window.bridge.httpsUpgradeToggle(action.endsWith('true'))
         if (action.startsWith('pick-download-path')) {
           window.bridge.pickDownloadPath().then(newPath => {
             if (!newPath || !el.__ready) return
@@ -1705,6 +1710,13 @@ function toggleSidebar() {
   localStorage.setItem('arc-sidebar-visible', sidebarVisible)
 }
 
+function toggleFocusMode() {
+  focusMode = !focusMode
+  document.body.classList.toggle('focus-mode', focusMode)
+  const btn = document.getElementById('btn-focus-mode')
+  if (btn) btn.classList.toggle('active', focusMode)
+}
+
 
 // ============================================================
 // DRAG & DROP
@@ -1744,6 +1756,7 @@ function handleShortcut(mod, shift, alt, code) {
   if (mod && code === 'KeyD') { addCurrentPageAsEssential(); return true }
   if (code === 'F3')  { openFind(); return true }
   if (code === 'F5')  { if (webviewReady) wv().reload(); return true }
+  if (code === 'F8')  { toggleFocusMode(); return true }
   if (code === 'F11') { window.bridge.toggleFullscreen(); return true }
   if (alt && code === 'ArrowLeft')  { if (webviewReady && wv().canGoBack())    wv().goBack();    return true }
   if (alt && code === 'ArrowRight') { if (webviewReady && wv().canGoForward()) wv().goForward(); return true }
@@ -1919,6 +1932,7 @@ btnMute.addEventListener('click', () => {
 })
 
 document.getElementById('btn-toggle-sidebar').addEventListener('click', toggleSidebar)
+document.getElementById('btn-focus-mode').addEventListener('click', toggleFocusMode)
 document.getElementById('btn-new-private').addEventListener('click', () => createTab(null, true))
 document.getElementById('btn-downloads').addEventListener('click', () => {
   const btn = document.getElementById('btn-downloads')
@@ -2338,6 +2352,7 @@ favoritesList.addEventListener('drop', e => {
     { type:'action', title:'Fermer l\'onglet',           icon:'close-tab',  kbd:'Ctrl+W',   run:() => { if (activeTabId && !activeEssentialId) closeTab(activeTabId) } },
     { type:'action', title:'Plein écran',                icon:'fullscreen', kbd:'F11',      run:() => window.bridge.toggleFullscreen() },
     { type:'action', title:'Afficher / masquer sidebar', icon:'sidebar',    kbd:'Ctrl+B',   run:() => toggleSidebar() },
+    { type:'action', title:'Mode focus',                 icon:'focus',      kbd:'F8',       run:() => toggleFocusMode() },
     { type:'action', title:'Épingler en Essential',      icon:'pin',        kbd:'Ctrl+D',   run:() => addCurrentPageAsEssential() },
     { type:'action', title:'Focus barre URL',            icon:'url',        kbd:'Ctrl+L',   run:() => { const inp = currentLayout === 'top' ? topUrlInput : urlInput; inp.focus(); inp.select() } },
   ]
@@ -2354,6 +2369,7 @@ favoritesList.addEventListener('drop', e => {
     'sidebar':    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>',
     'pin':        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
     'url':        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    'focus':      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
     'globe':      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
   }
 

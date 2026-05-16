@@ -1457,6 +1457,17 @@ body.light .ctx-divider { background: #e5e5ea }
 body.light .ctx-label { color: #8e8e93 }
 
 body.light .folder-icon-svg { color: #d97700 }
+
+/* ── Mode focus ── */
+body.focus-mode .sidebar {
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  border-right: none !important;
+}
+body.focus-mode .top-tab-bar { display: none !important; }
+body.focus-mode #btn-focus-mode { color: #0a84ff; }
+body.focus-mode #btn-focus-mode:hover { color: #409cff; }
 body.light .folder-chevron { color: #aeaeb2 }
 
 body.light .fav-folder:hover { background: rgba(0,0,0,.05) }

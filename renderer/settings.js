@@ -35,6 +35,9 @@ document.getElementById('btn-pick-download').addEventListener('click', function(
 document.getElementById('web-dark-toggle').addEventListener('change', function() {
   document.title = 'divo-action:web-dark:' + this.checked
 })
+document.getElementById('https-upgrade-toggle').addEventListener('change', function() {
+  document.title = 'divo-action:https-upgrade:' + this.checked
+})
 document.getElementById('default-browser-btn').addEventListener('click', function() {
   document.title = 'divo-settings-action:set-default-browser'
 })
