@@ -257,6 +257,24 @@
 
   </div>
 </div>
+
+<!-- ── Command Palette ── -->
+<div class="cmd-overlay" id="cmd-overlay" style="display:none" aria-modal="true" role="dialog">
+  <div class="cmd-backdrop" id="cmd-backdrop"></div>
+  <div class="cmd-modal">
+    <div class="cmd-search-row">
+      <svg class="cmd-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input id="cmd-input" class="cmd-input" type="text"
+             placeholder="Rechercher onglets, favoris, actions…"
+             autocomplete="off" spellcheck="false">
+      <kbd class="cmd-esc-hint">Esc</kbd>
+    </div>
+    <div class="cmd-results" id="cmd-results"></div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

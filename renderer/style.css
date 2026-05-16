@@ -1696,3 +1696,161 @@ body.light .history-title { color: #1c1c1e }
   border-radius: 7px;
   min-height: 32px
 }
+
+/* ── Command Palette ── */
+.cmd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 72px;
+}
+.cmd-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.cmd-modal {
+  position: relative;
+  width: 580px;
+  max-width: calc(100vw - 48px);
+  background: #1c1c1e;
+  border: 1px solid #323234;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 28px 72px rgba(0,0,0,.7), 0 0 0 .5px rgba(255,255,255,.06);
+  animation: cmd-in .12s ease;
+}
+@keyframes cmd-in {
+  from { opacity: 0; transform: scale(.97) translateY(-6px) }
+  to   { opacity: 1; transform: scale(1) translateY(0) }
+}
+.cmd-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid #252527;
+}
+.cmd-search-icon { color: #48484a; flex-shrink: 0 }
+.cmd-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: #f5f5f7;
+  font-size: 15px;
+  font-family: inherit;
+  caret-color: #0a84ff;
+}
+.cmd-input::placeholder { color: #3a3a3c }
+.cmd-esc-hint {
+  font-size: 10px;
+  font-family: inherit;
+  color: #3a3a3c;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 4px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+.cmd-results {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.cmd-results::-webkit-scrollbar { width: 4px }
+.cmd-results::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 2px }
+.cmd-section {
+  padding: 6px 0 2px;
+}
+.cmd-section:not(:first-child) { border-top: 1px solid #252527; margin-top: 4px; padding-top: 10px }
+.cmd-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #48484a;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  padding: 0 16px 4px;
+}
+.cmd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+}
+.cmd-item.active { background: rgba(10,132,255,.15) }
+.cmd-item:hover  { background: #2c2c2e }
+.cmd-item.active:hover { background: rgba(10,132,255,.2) }
+.cmd-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #636366;
+}
+.cmd-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.cmd-info { flex: 1; min-width: 0 }
+.cmd-title {
+  font-size: 13px;
+  color: #e8e8ed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmd-title mark {
+  background: rgba(10,132,255,.35);
+  color: #f5f5f7;
+  border-radius: 2px;
+}
+.cmd-url {
+  font-size: 11px;
+  color: #48484a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.cmd-kbd {
+  font-size: 10px;
+  color: #48484a;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.cmd-empty {
+  padding: 36px 16px;
+  text-align: center;
+  color: #3a3a3c;
+  font-size: 13px;
+}
+
+/* Thème clair */
+html[data-theme="light"] .cmd-modal { background: #fff; border-color: #d1d1d6; box-shadow: 0 28px 72px rgba(0,0,0,.25) }
+html[data-theme="light"] .cmd-search-row { border-bottom-color: #e5e5ea }
+html[data-theme="light"] .cmd-input { color: #1c1c1e }
+html[data-theme="light"] .cmd-input::placeholder { color: #aeaeb2 }
+html[data-theme="light"] .cmd-esc-hint { color: #8e8e93; background: #f2f2f7; border-color: #d1d1d6 }
+html[data-theme="light"] .cmd-section:not(:first-child) { border-top-color: #e5e5ea }
+html[data-theme="light"] .cmd-item.active { background: rgba(10,132,255,.1) }
+html[data-theme="light"] .cmd-item:hover  { background: #f2f2f7 }
+html[data-theme="light"] .cmd-title { color: #1c1c1e }
+html[data-theme="light"] .cmd-kbd { background: #f2f2f7; border-color: #d1d1d6; color: #8e8e93 }

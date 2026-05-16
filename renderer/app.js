@@ -1722,6 +1722,7 @@ function handleShortcut(mod, shift, alt, code) {
   if (mod && code === 'KeyL') { const inp = currentLayout === 'top' ? topUrlInput : urlInput; setTimeout(() => { wv().blur(); inp.focus(); inp.select() }, 50); return true }
   if (mod && code === 'KeyR') { if (webviewReady) shift ? wv().reloadIgnoringCache() : wv().reload(); return true }
   if (mod && code === 'KeyF') { setTimeout(() => { wv().blur(); openFind() }, 50); return true }
+  if (mod && code === 'KeyK') { openPalette(); return true }
   if (mod && code === 'KeyH') { toggleHistory(); return true }
   if (mod && code === 'KeyB') { toggleSidebar(); return true }
   if (mod && code === 'KeyD') { addCurrentPageAsEssential(); return true }
@@ -1734,6 +1735,7 @@ function handleShortcut(mod, shift, alt, code) {
   if (mod && (code === 'Minus'  || code === 'NumpadSubtract')) { zoomOut();   return true }
   if (mod && (code === 'Digit0' || code === 'Numpad0'))        { zoomReset(); return true }
   if (code === 'Escape') {
+    if (document.getElementById('cmd-overlay')?.style.display === 'flex') { closePalette(); return true }
     if (permBar.classList.contains('visible'))    { permBar.classList.remove('visible'); return true }
     if (findBar.classList.contains('visible'))    { closeFind();   return true }
     if (historyPanel.classList.contains('visible')) { closeHistory(); return true }
@@ -2287,4 +2289,208 @@ favoritesList.addEventListener('drop', e => {
     renderFavorites()
   }
 })
+
+// ═══════════════════════════════════════════════
+// ── COMMAND PALETTE (Ctrl+K)
+// ═══════════════════════════════════════════════
+;(function() {
+  const overlay  = document.getElementById('cmd-overlay')
+  const backdrop = document.getElementById('cmd-backdrop')
+  const input    = document.getElementById('cmd-input')
+  const results  = document.getElementById('cmd-results')
+
+  let activeIdx  = -1
+  let items      = []   // liste plate des items renderisés
+
+  // ── Actions statiques
+  const ACTIONS = [
+    { type:'action', title:'Nouvel onglet',              icon:'new-tab',    kbd:'Ctrl+T',   run:() => createTab() },
+    { type:'action', title:'Navigation privée',          icon:'private',    kbd:'Ctrl+⇧N',  run:() => createTab(null, true) },
+    { type:'action', title:'Paramètres',                 icon:'settings',   kbd:'',         run:() => createTab(SETTINGS_URL) },
+    { type:'action', title:'Historique',                 icon:'history',    kbd:'Ctrl+H',   run:() => toggleHistory() },
+    { type:'action', title:'Téléchargements',            icon:'downloads',  kbd:'',         run:() => document.getElementById('btn-downloads')?.click() },
+    { type:'action', title:'Recharger la page',          icon:'reload',     kbd:'Ctrl+R',   run:() => { if (webviewReady) wv().reload() } },
+    { type:'action', title:'Fermer l\'onglet',           icon:'close-tab',  kbd:'Ctrl+W',   run:() => { if (activeTabId && !activeEssentialId) closeTab(activeTabId) } },
+    { type:'action', title:'Plein écran',                icon:'fullscreen', kbd:'F11',      run:() => window.bridge.toggleFullscreen() },
+    { type:'action', title:'Afficher / masquer sidebar', icon:'sidebar',    kbd:'Ctrl+B',   run:() => toggleSidebar() },
+    { type:'action', title:'Épingler en Essential',      icon:'pin',        kbd:'Ctrl+D',   run:() => addCurrentPageAsEssential() },
+    { type:'action', title:'Focus barre URL',            icon:'url',        kbd:'Ctrl+L',   run:() => { const inp = currentLayout === 'top' ? topUrlInput : urlInput; inp.focus(); inp.select() } },
+  ]
+
+  const ICONS = {
+    'new-tab':    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    'private':    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+    'settings':   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>',
+    'history':    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    'downloads':  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    'reload':     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    'close-tab':  '<svg width="12" height="12" viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" stroke-width="1.5"/></svg>',
+    'fullscreen': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>',
+    'sidebar':    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>',
+    'pin':        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
+    'url':        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    'globe':      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  }
+
+  // ── Helpers
+  function getHistory() {
+    try { return JSON.parse(localStorage.getItem('arc-history') || '[]') } catch { return [] }
+  }
+
+  function match(q, title, url) {
+    if (!q) return true
+    const lq = q.toLowerCase()
+    return (title || '').toLowerCase().includes(lq) || (url || '').toLowerCase().includes(lq)
+  }
+
+  function highlight(text, q) {
+    if (!q || !text) return escapeHtml(text || '')
+    const i = text.toLowerCase().indexOf(q.toLowerCase())
+    if (i === -1) return escapeHtml(text)
+    return escapeHtml(text.slice(0, i)) +
+      `<mark>${escapeHtml(text.slice(i, i + q.length))}</mark>` +
+      escapeHtml(text.slice(i + q.length))
+  }
+
+  // ── Rendu
+  function render(q) {
+    const html  = []
+    items = []
+
+    function section(label, list, builder) {
+      if (!list.length) return
+      html.push(`<div class="cmd-section"><div class="cmd-section-label">${label}</div>`)
+      list.forEach(it => { builder(it); })
+      html.push('</div>')
+    }
+
+    function addItem(item, titleHtml, urlText, kbdText, iconHtml) {
+      const idx = items.length
+      items.push(item)
+      const kbd = kbdText ? `<span class="cmd-kbd">${escapeHtml(kbdText)}</span>` : ''
+      const url = urlText ? `<div class="cmd-url">${escapeHtml(urlText)}</div>` : ''
+      html.push(`<div class="cmd-item" data-idx="${idx}">
+        <div class="cmd-icon">${iconHtml}</div>
+        <div class="cmd-info"><div class="cmd-title">${titleHtml}</div>${url}</div>
+        ${kbd}
+      </div>`)
+    }
+
+    // Si query non vide : toujours proposer "Ouvrir / Rechercher" en tête
+    if (q) {
+      const nav = { type: 'navigate', url: normalizeUrl(q) }
+      const isUrl = /^https?:\/\/|^[\w-]+\.[\w.-]{2,}/.test(q)
+      const label = isUrl ? `Ouvrir  ${q}` : `Rechercher  "${q}"`
+      addItem(nav, `<span style="color:#0a84ff">${escapeHtml(label)}</span>`, '', '', ICONS.globe)
+    }
+
+    // Actions
+    const actFiltered = ACTIONS.filter(a => match(q, a.title, ''))
+    section('Actions', actFiltered, a => addItem(a, highlight(a.title, q), '', a.kbd, ICONS[a.icon] || ICONS.globe))
+
+    // Onglets ouverts (essentials + tabs du space courant)
+    const openTabs = [...essentials.map(e => ({ ...e, _ess: true })), ...tabs.filter(t => !t.archived)]
+      .filter(t => match(q, t.title, t.url))
+      .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))
+      .slice(0, 10)
+    section('Onglets ouverts', openTabs, t => {
+      const fav = safeFavicon(t.favicon)
+      const ico = fav ? `<img class="cmd-favicon" src="${fav}">` : ICONS.globe
+      const badge = t._ess ? ' <span style="font-size:10px;color:#48484a">Essential</span>' : ''
+      addItem({ type: t._ess ? 'essential' : 'tab', id: t.id }, highlight(t.title || t.url, q) + badge, t.url, '', ico)
+    })
+
+    // Favoris
+    const favFiltered = favorites.filter(f => match(q, f.title, f.url)).slice(0, 6)
+    section('Favoris', favFiltered, f => {
+      const fav = safeFavicon(f.favicon)
+      const ico = fav ? `<img class="cmd-favicon" src="${fav}">` : ICONS.globe
+      addItem({ type: 'open', url: f.url }, highlight(f.title || f.url, q), f.url, '', ico)
+    })
+
+    // Historique (seulement si query non vide)
+    if (q) {
+      const hist = getHistory().filter(h => match(q, h.title, h.url)).slice(0, 8)
+      section('Historique', hist, h => {
+        const fav = safeFavicon(h.favicon)
+        const ico = fav ? `<img class="cmd-favicon" src="${fav}">` : ICONS.globe
+        addItem({ type: 'open', url: h.url }, highlight(h.title || h.url, q), h.url, '', ico)
+      })
+    }
+
+    if (!items.length) {
+      html.push(`<div class="cmd-empty">Aucun résultat pour « ${escapeHtml(q)} »</div>`)
+    }
+
+    results.innerHTML = html.join('')
+
+    // Attacher les événements
+    results.querySelectorAll('.cmd-item').forEach((el, i) => {
+      el.addEventListener('mouseenter', () => setActive(i, false))
+      el.addEventListener('click',      () => run(items[i]))
+    })
+
+    // Sélectionner le premier par défaut
+    activeIdx = items.length ? 0 : -1
+    highlight_active()
+  }
+
+  function setActive(idx, scroll = true) {
+    activeIdx = idx
+    highlight_active(scroll)
+  }
+
+  function highlight_active(scroll = true) {
+    results.querySelectorAll('.cmd-item').forEach((el, i) => {
+      el.classList.toggle('active', i === activeIdx)
+    })
+    if (scroll) {
+      const el = results.querySelector('.cmd-item.active')
+      if (el) el.scrollIntoView({ block: 'nearest' })
+    }
+  }
+
+  function run(item) {
+    if (!item) return
+    close()
+    switch (item.type) {
+      case 'action':    item.run(); break
+      case 'tab':       activateTab(item.id); break
+      case 'essential': activateEssential(item.id); break
+      case 'open':
+      case 'navigate':  createTab(item.url); break
+    }
+  }
+
+  // ── Open / Close
+  function open() {
+    overlay.style.display = 'flex'
+    input.value = ''
+    render('')
+    requestAnimationFrame(() => input.focus())
+  }
+
+  function close() {
+    overlay.style.display = 'none'
+    try { wv().focus() } catch {}
+  }
+
+  // ── Événements
+  input.addEventListener('input', () => { activeIdx = 0; render(input.value.trim()) })
+
+  input.addEventListener('keydown', e => {
+    switch (e.key) {
+      case 'Escape':    e.preventDefault(); close(); break
+      case 'ArrowDown': e.preventDefault(); setActive(Math.min(activeIdx + 1, items.length - 1)); break
+      case 'ArrowUp':   e.preventDefault(); setActive(Math.max(activeIdx - 1, 0)); break
+      case 'Enter':     e.preventDefault(); run(items[activeIdx]); break
+    }
+  })
+
+  backdrop.addEventListener('click', close)
+
+  // ── Export vers handleShortcut
+  window.openPalette  = open
+  window.closePalette = close
+})()
 
