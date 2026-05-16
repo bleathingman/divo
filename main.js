@@ -19,6 +19,17 @@ const pendingPerms  = new Map()
 // Protocoles autorisés dans le webview — tout le reste → shell.openExternal()
 const SAFE_PROTOS = new Set(['http:', 'https:', 'divo:', 'file:', 'chrome:'])
 
+// Domaines jamais bloqués par l'adblocker (infrastructure légitime)
+const ADBLOCK_NEVER_BLOCK = new Set([
+  'google.com', 'googleapis.com', 'gstatic.com', 'googleusercontent.com',
+  'googlevideo.com', 'google.fr', 'google.co.uk', 'google.de', 'google.ca',
+  'google.es', 'google.it', 'google.com.br', 'google.com.au', 'google.co.jp',
+  'apple.com', 'icloud.com', 'aaplimg.com',
+  'microsoft.com', 'microsoftonline.com', 'live.com', 'office.com',
+  'cloudflare.com', 'cloudflare-dns.com',
+  'fastly.net', 'akamaized.net', 'akamai.net',
+])
+
 const WEBVIEW_SHORTCUTS = new Set([
   'ctrl+KeyT', 'ctrl+shift+KeyT', 'ctrl+shift+KeyN', 'ctrl+KeyW',
   'ctrl+KeyL', 'ctrl+KeyR', 'ctrl+shift+KeyR', 'ctrl+KeyF',
@@ -37,7 +48,7 @@ function saveConfig() { try { fs.writeFileSync(configPath, JSON.stringify(config
 
 // ── Adblocker (uBlock Origin-style)
 const BL_DIR = app.getPath('userData')
-const BL_VER = 'v5'
+const BL_VER = 'v6'
 const BL_DOMAINS_FILE  = path.join(BL_DIR, `bl_${BL_VER}_domains.txt`)
 const BL_COSMETIC_FILE = path.join(BL_DIR, `bl_${BL_VER}_cosmetic.json`)
 const BL_TTL = 7 * 24 * 60 * 60 * 1000
@@ -70,7 +81,8 @@ function parseDomainText(text) {
 }
 
 // Parse liste ABP/EasyList → domaines réseau + règles cosmétiques
-function parseAbpList(text, domainSet, genericSels, domainSels) {
+// parseNetRules=false : cosmétiques seulement (évite que EasyList bloque des services légitimes)
+function parseAbpList(text, domainSet, genericSels, domainSels, parseNetRules = true) {
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim()
     if (!line || line.startsWith('!') || line.startsWith('[')) continue
@@ -98,11 +110,13 @@ function parseAbpList(text, domainSet, genericSels, domainSels) {
     }
 
     // Règle réseau : extraire domaine depuis ||domaine^
-    let rule = line
-    if (line.includes('$')) rule = line.slice(0, line.lastIndexOf('$'))
-    if (rule.startsWith('||')) {
-      const inner = rule.slice(2).split(/[\^\/\?]/)[0].toLowerCase()
-      if (inner && inner.includes('.') && /^[a-z0-9._-]+$/.test(inner)) domainSet.add(inner)
+    if (parseNetRules) {
+      let rule = line
+      if (line.includes('$')) rule = line.slice(0, line.lastIndexOf('$'))
+      if (rule.startsWith('||')) {
+        const inner = rule.slice(2).split(/[\^\/\?]/)[0].toLowerCase()
+        if (inner && inner.includes('.') && /^[a-z0-9._-]+$/.test(inner)) domainSet.add(inner)
+      }
     }
   }
 }
@@ -142,7 +156,9 @@ async function refreshFilterLists() {
     }
 
     if (elRes.status === 'fulfilled' && elRes.value.ok) {
-      parseAbpList(await elRes.value.text(), newDomains, newGeneric, newByDomain)
+      // parseNetRules=false : on utilise EasyList pour les cosmétiques uniquement,
+      // OISD couvre déjà le blocage réseau sans risquer des faux-positifs Google/CDN
+      parseAbpList(await elRes.value.text(), newDomains, newGeneric, newByDomain, false)
     }
 
     // Sauvegarde
@@ -182,43 +198,61 @@ function initBlocklist() {
   if (needsRefresh) refreshFilterLists()
 }
 
-function setupCsp() {
-  const CSP_INTERNAL =
-    "default-src 'none'; " +
-    "img-src https: data: blob:; " +
-    "style-src 'self' 'unsafe-inline'; " +
-    "script-src 'self' 'unsafe-inline'; " +
-    "connect-src 'none'; " +
-    "frame-src https://chromedino.com; " +
-    "object-src 'none'; " +
-    "base-uri 'none'"
-  session.defaultSession.webRequest.onHeadersReceived(
-    { urls: ['divo://*/*'] },
-    (details, callback) => {
-      const headers = { ...details.responseHeaders }
-      headers['content-security-policy'] = [CSP_INTERNAL]
-      callback({ responseHeaders: headers })
+// Sessions qui hébergent des webviews — les handlers de sécurité doivent couvrir toutes.
+const PROTECTED_PARTITIONS = ['persist:divo', 'private:incognito']
+function getProtectedSessions() {
+  return [session.defaultSession, ...PROTECTED_PARTITIONS.map(p => session.fromPartition(p))]
+}
+
+// ── Handlers nommés (appliqués sur chaque session)
+const CSP_INTERNAL =
+  "default-src 'none'; " +
+  "img-src https: data: blob:; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "script-src 'self' 'unsafe-inline'; " +
+  "connect-src 'none'; " +
+  "frame-src https://chromedino.com; " +
+  "object-src 'none'; " +
+  "base-uri 'none'"
+
+function cspHandler(details, callback) {
+  const headers = { ...details.responseHeaders }
+  headers['content-security-policy'] = [CSP_INTERNAL]
+  callback({ responseHeaders: headers })
+}
+
+function adblockHandler(details, callback) {
+  if (!config.adblock || !blockedDomains.size || details.resourceType === 'mainFrame') {
+    callback({}); return
+  }
+  const scheme = details.url.split(':')[0]
+  if (scheme === 'divo' || scheme === 'file' || scheme === 'chrome-extension') {
+    callback({}); return
+  }
+  try {
+    const parts = new URL(details.url).hostname.toLowerCase().split('.')
+    // Whitelist : ne jamais bloquer l'infrastructure légitime
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (ADBLOCK_NEVER_BLOCK.has(parts.slice(i).join('.'))) { callback({}); return }
     }
-  )
+    // Blocklist
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (blockedDomains.has(parts.slice(i).join('.'))) { callback({ cancel: true }); return }
+    }
+  } catch {}
+  callback({})
+}
+
+function setupCsp() {
+  for (const s of getProtectedSessions()) {
+    s.webRequest.onHeadersReceived({ urls: ['divo://*/*'] }, cspHandler)
+  }
 }
 
 function setupAdblocker() {
-  session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
-    if (!config.adblock || !blockedDomains.size || details.resourceType === 'mainFrame') {
-      callback({}); return
-    }
-    const scheme = details.url.split(':')[0]
-    if (scheme === 'divo' || scheme === 'file' || scheme === 'chrome-extension') {
-      callback({}); return
-    }
-    try {
-      const parts = new URL(details.url).hostname.toLowerCase().split('.')
-      for (let i = 0; i < parts.length - 1; i++) {
-        if (blockedDomains.has(parts.slice(i).join('.'))) { callback({ cancel: true }); return }
-      }
-    } catch {}
-    callback({})
-  })
+  for (const s of getProtectedSessions()) {
+    s.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, adblockHandler)
+  }
 }
 
 // ── CSS anti-pub générique (toutes les pages)
@@ -609,20 +643,15 @@ ipcMain.handle('install-update', async () => {
   const fileName = isLinux ? 'Divo-update.AppImage' : 'Divo-Setup-update.exe'
   const tmpPath = path.join(app.getPath('temp'), fileName)
   try {
+    mainWindow?.webContents.send('update-progress', 5)
     const res = await net.fetch(url)
     if (!res.ok) throw new Error('HTTP ' + res.status)
-    const total = parseInt(res.headers.get('content-length') || '0', 10)
-    const writer = fs.createWriteStream(tmpPath)
-    const reader = res.body.getReader()
-    let received = 0
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      writer.write(Buffer.from(value))
-      received += value.length
-      if (total > 0) mainWindow?.webContents.send('update-progress', Math.round(received / total * 100))
-    }
-    await new Promise((resolve, reject) => writer.end(e => e ? reject(e) : resolve()))
+    // arrayBuffer() évite les problèmes de streaming sur les redirects GitHub → CDN
+    const buffer = Buffer.from(await res.arrayBuffer())
+    if (buffer.length < 1024) throw new Error('Fichier téléchargé trop petit')
+    mainWindow?.webContents.send('update-progress', 90)
+    fs.writeFileSync(tmpPath, buffer)
+    mainWindow?.webContents.send('update-progress', 100)
 
     if (isLinux) {
       const currentAppImage = process.env.APPIMAGE
@@ -664,6 +693,7 @@ ipcMain.handle('install-update', async () => {
     return { ok: true }
   } catch (e) {
     console.error('install-update error', e)
+    shell.openExternal(`https://github.com/${REPO}/releases/latest`)
     return { ok: false }
   }
 })
@@ -676,8 +706,14 @@ function createWindow() {
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, nodeIntegration: false,
-      webviewTag: true, backgroundThrottling: false, spellcheck: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: true,
+      backgroundThrottling: false,
+      spellcheck: false,
     }
   })
 
@@ -718,6 +754,44 @@ function createWindow() {
     webPreferences.allowRunningInsecureContent = false
     webPreferences.experimentalFeatures        = false
   })
+}
+
+// ── Ouverture de liens externes avec confirmation pour les protocoles inconnus
+// Protocoles inoffensifs : pas d'args sensibles, dialog inutile
+const ALWAYS_OPEN_PROTOS = new Set(['mailto:', 'tel:', 'sms:', 'callto:'])
+const userAllowedProtos  = new Set(JSON.parse(config.allowedExternalProtos || '[]'))
+// Rate-limiting : 1 dialog par proto par seconde max (anti-spam)
+const lastDialogTime = new Map()
+
+async function maybeOpenExternal(url, originHostname) {
+  let proto
+  try { proto = new URL(url).protocol } catch { return }
+  if (ALWAYS_OPEN_PROTOS.has(proto) || userAllowedProtos.has(proto)) {
+    shell.openExternal(url).catch(() => {})
+    return
+  }
+  // Rate-limit : ignorer si un dialog pour ce proto a été affiché < 1s
+  const now = Date.now()
+  if (now - (lastDialogTime.get(proto) || 0) < 1000) return
+  lastDialogTime.set(proto, now)
+
+  const { response, checkboxChecked } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Ouvrir un lien externe',
+    message: `Cette page veut ouvrir un lien ${proto}`,
+    detail: `Origine : ${originHostname || 'inconnue'}\nURL : ${url.slice(0, 200)}`,
+    buttons: ['Annuler', 'Ouvrir'],
+    defaultId: 0,
+    cancelId: 0,
+    checkboxLabel: `Toujours autoriser ${proto} sur ce navigateur`,
+  })
+  if (response !== 1) return
+  if (checkboxChecked) {
+    userAllowedProtos.add(proto)
+    config.allowedExternalProtos = JSON.stringify([...userAllowedProtos])
+    saveConfig()
+  }
+  shell.openExternal(url).catch(() => {})
 }
 
 app.whenReady().then(async () => {
@@ -765,48 +839,48 @@ app.whenReady().then(async () => {
     })
   })
 
-  // ── Permissions
+  // ── Permissions — appliquées sur toutes les sessions webview
   // Accordées silencieusement (tous les navigateurs font pareil)
   const PERM_AUTO_ALLOW = new Set([
     'fullscreen', 'pointerLock',
-    'clipboard-sanitized-write', // écriture clipboard standard (pas de lecture)
-    'storage-access',            // accès storage pour iframes (flows de login)
-    'top-level-storage-access',  // idem en contexte top-level
-    'mediaKeySystem',            // DRM — nécessaire pour Netflix, Disney+, etc.
-    'screen-wake-lock',          // empêche la mise en veille pendant les vidéos
-    'midi',                      // MIDI basique (sans SysEx)
+    'clipboard-sanitized-write',
+    'storage-access',
+    'top-level-storage-access',
+    'mediaKeySystem',
+    'screen-wake-lock',
+    'midi',
   ])
-  // Refusées silencieusement (aucun site normal n'en a besoin)
   const PERM_AUTO_DENY = new Set([
     'serial', 'usb', 'hid', 'bluetooth', 'idle-detection',
   ])
+  const PERM_LABELS = {
+    media:              'Caméra et/ou Microphone',
+    geolocation:        'Localisation',
+    notifications:      'Notifications',
+    'clipboard-read':   'Presse-papiers (lecture)',
+    midiSysex:          'MIDI (SysEx)',
+    'window-management':'Gestion multi-écrans',
+  }
 
-  session.defaultSession.setPermissionCheckHandler((wc, permission) => {
-    if (PERM_AUTO_ALLOW.has(permission)) return true
-    if (PERM_AUTO_DENY.has(permission))  return false
-    return null
-  })
-
-  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
-    if (PERM_AUTO_ALLOW.has(permission)) { callback(true);  return }
-    if (PERM_AUTO_DENY.has(permission))  { callback(false); return }
-    const key = Date.now() + '-' + Math.random()
-    pendingPerms.set(key, callback)
-    const labels = {
-      media:              'Caméra et/ou Microphone',
-      geolocation:        'Localisation',
-      notifications:      'Notifications',
-      'clipboard-read':   'Presse-papiers (lecture)',
-      midiSysex:          'MIDI (SysEx)',
-      'window-management':'Gestion multi-écrans',
-    }
-    mainWindow.webContents.send('permission-request', {
-      key,
-      permission,
-      label: labels[permission] || permission,
-      origin: (() => { try { return new URL(details?.requestingUrl || wc.getURL()).hostname } catch { return 'ce site' } })()
+  for (const s of getProtectedSessions()) {
+    s.setPermissionCheckHandler((wc, permission) => {
+      if (PERM_AUTO_ALLOW.has(permission)) return true
+      if (PERM_AUTO_DENY.has(permission))  return false
+      return null
     })
-  })
+    s.setPermissionRequestHandler((wc, permission, callback, details) => {
+      if (PERM_AUTO_ALLOW.has(permission)) { callback(true);  return }
+      if (PERM_AUTO_DENY.has(permission))  { callback(false); return }
+      const key = Date.now() + '-' + Math.random()
+      pendingPerms.set(key, callback)
+      mainWindow.webContents.send('permission-request', {
+        key,
+        permission,
+        label: PERM_LABELS[permission] || permission,
+        origin: (() => { try { return new URL(details?.requestingUrl || wc.getURL()).hostname } catch { return 'ce site' } })()
+      })
+    })
+  }
 
   // ── Nouvelles fenêtres → onglets + injection pub
   app.on('web-contents-created', (_, contents) => {
@@ -817,7 +891,8 @@ app.whenReady().then(async () => {
           const proto = new URL(url).protocol
           if (!SAFE_PROTOS.has(proto) && !proto.startsWith('chrome-extension')) {
             event.preventDefault()
-            shell.openExternal(url).catch(() => {})
+            const origin = (() => { try { return new URL(contents.getURL()).hostname } catch { return '' } })()
+            maybeOpenExternal(url, origin)
           }
         } catch {}
       })
@@ -893,7 +968,8 @@ app.whenReady().then(async () => {
         try {
           const proto = new URL(url).protocol
           if (!SAFE_PROTOS.has(proto) && !proto.startsWith('chrome-extension')) {
-            shell.openExternal(url).catch(() => {})
+            const origin = (() => { try { return new URL(contents.getURL()).hostname } catch { return '' } })()
+            maybeOpenExternal(url, origin)
             return { action: 'deny' }
           }
         } catch {}

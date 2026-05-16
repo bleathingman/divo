@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Maintient les SHAs des GitHub Actions à jour automatiquement
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+
+  # Maintient les dépendances npm à jour
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies

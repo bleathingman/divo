@@ -5,12 +5,17 @@ on:
     tags:
       - 'v*'
 
+# Permissions minimales au niveau workflow (chaque job peut restreindre davantage)
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Create GitHub Release
         run: |
@@ -26,40 +31,71 @@ jobs:
   build-windows:
     needs: create-release
     runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - run: npm install
+          cache: 'npm'
+      - run: npm ci
       - name: Build Windows
         run: npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-      - name: Upload Windows artifacts
+      - name: SHA256SUMS + upload Windows
         run: |
           $files = Get-ChildItem dist\*.exe | Select-Object -ExpandProperty FullName
+          $sumsFile = "dist\SHA256SUMS-windows.txt"
           foreach ($f in $files) {
+            $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+            "$hash  $(Split-Path $f -Leaf)" | Add-Content $sumsFile
             gh release upload "${{ github.ref_name }}" $f --clobber
           }
+          gh release upload "${{ github.ref_name }}" $sumsFile --clobber
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attestation de provenance SLSA (Windows)
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: 'dist/*.exe'
 
   build-linux:
     needs: create-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
+          cache: 'npm'
       - name: Install Linux dependencies
         run: sudo apt-get update && sudo apt-get install -y libarchive-tools rpm fakeroot
-      - run: npm install
+      - run: npm ci
       - name: Build Linux
         run: npm run build:linux -- --publish never
-      - name: Upload AppImage
-        run: gh release upload "${{ github.ref_name }}" dist/*.AppImage --clobber
+      - name: SHA256SUMS + upload Linux
+        run: |
+          sha256sum dist/*.AppImage > dist/SHA256SUMS-linux.txt
+          gh release upload "${{ github.ref_name }}" dist/*.AppImage --clobber
+          gh release upload "${{ github.ref_name }}" dist/SHA256SUMS-linux.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attestation de provenance SLSA (Linux)
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: 'dist/*.AppImage'
+      - name: SBOM CycloneDX
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-file dist/divo-sbom.json
+      - name: Upload SBOM
+        run: gh release upload "${{ github.ref_name }}" dist/divo-sbom.json --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

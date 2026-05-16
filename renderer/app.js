@@ -100,6 +100,10 @@ function safeTabUrl(u) {
   } catch {}
   return NEWTAB_URL
 }
+// Valide une couleur CSS avant interpolation dans style="..." ou .style.prop
+// Accepte : #hex, rgb(), rgba(), hsl(), et noms CSS (blue, red…)
+const CSS_COLOR_RE = /^#[0-9a-f]{3,8}$|^rgba?\([\d.,\s/%]+\)$|^hsla?\([\d.,\s/%]+\)$|^[a-z]{2,30}$/i
+function safeColor(c) { return CSS_COLOR_RE.test(String(c || '')) ? c : '#0a84ff' }
 
 // SEC-001 — retourne le webview actif (pool normal ou privé)
 function wv() {
@@ -1248,7 +1252,7 @@ function renderSpaces() {
     btn.title = space.name
     const dot = document.createElement('span')
     dot.className = 'space-color-dot'
-    dot.style.background = space.color
+    dot.style.background = safeColor(space.color)
     const lbl = document.createElement('span')
     lbl.className = 'space-pill-name'
     lbl.textContent = space.name
@@ -1463,7 +1467,7 @@ function buildContextMenu(type) {
     if (otherSpaces.length) {
       html += `<div class="ctx-divider"></div><div class="ctx-label">Déplacer vers</div>`
       for (const s of otherSpaces) {
-        html += `<button class="ctx-item" data-action="move-space" data-target-space="${s.id}"><span class="ctx-space-dot" style="background:${s.color}"></span>${escapeHtml(s.name)}</button>`
+        html += `<button class="ctx-item" data-action="move-space" data-target-space="${s.id}"><span class="ctx-space-dot" style="background:${safeColor(s.color)}"></span>${escapeHtml(s.name)}</button>`
       }
     }
     html += `<div class="ctx-divider"></div><button class="ctx-item danger" data-action="close">${ICO.close} Fermer l'onglet</button>`
