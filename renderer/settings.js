@@ -27,7 +27,8 @@ layoutSelect.addEventListener('change', function() {
   document.title = 'divo-action:layout:' + this.value
 })
 const dlDisplay = document.getElementById('download-path-display')
-if (dlDisplay && window.__divoDlPath) dlDisplay.textContent = window.__divoDlPath
+const dlPath = document.querySelector('meta[name="divo-dl-path"]')?.content
+if (dlDisplay && dlPath) dlDisplay.textContent = dlPath
 document.getElementById('btn-pick-download').addEventListener('click', function() {
   document.title = 'divo-action:pick-download-path:' + Date.now()
 })

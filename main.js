@@ -814,18 +814,40 @@ app.whenReady().then(async () => {
   setupCsp()
 
   // ── Protocole divo://
+  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html' }
+  const DIVO_MIME  = { '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
+                       '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+                       '.woff': 'font/woff', '.woff2': 'font/woff2' }
+  const RENDERER_DIR = path.join(__dirname, 'renderer')
+
   protocol.handle('divo', (request) => {
-    const url = new URL(request.url)
-    const file = url.hostname === 'newtab'   ? 'newtab.html'
-               : url.hostname === 'settings' ? 'settings.html'
-               : url.hostname === 'dino'     ? 'dino.html'
-               : null
+    const url      = new URL(request.url)
+    const { hostname, pathname } = url
+
+    // Sous-ressources statiques (newtab.js, settings.js, style.css…)
+    if (pathname && pathname !== '/') {
+      const rel      = path.normalize(pathname.replace(/^\/+/, ''))
+      const filePath = path.join(RENDERER_DIR, rel)
+      // Garde path-traversal : le chemin résolu doit rester dans renderer/
+      if (!filePath.startsWith(RENDERER_DIR + path.sep) && filePath !== RENDERER_DIR) {
+        return new Response('Forbidden', { status: 403 })
+      }
+      const mime = DIVO_MIME[path.extname(rel).toLowerCase()]
+      if (!mime || !fs.existsSync(filePath)) return new Response('Not found', { status: 404 })
+      return new Response(fs.readFileSync(filePath), { headers: { 'Content-Type': mime } })
+    }
+
+    // Page principale
+    const file = DIVO_PAGES[hostname]
     if (file) {
-      const theme = config.theme || 'dark'
-      const dlPath = JSON.stringify(config.downloadPath || app.getPath('downloads'))
-      const inject = `<script>document.documentElement.setAttribute('data-theme',${JSON.stringify(theme)});window.__divoDlPath=${dlPath};<\/script>`
-      const html = fs.readFileSync(path.join(__dirname, 'renderer', file), 'utf-8')
-        .replace('<head>', '<head>' + inject)
+      const theme  = config.theme || 'dark'
+      const dlPath = (config.downloadPath || app.getPath('downloads')).replace(/"/g, '&quot;')
+      // Injection sans script inline (CSP script-src 'self') :
+      // • data-theme directement sur <html> → pas de FOUC
+      // • <meta name="divo-dl-path"> → lu par settings.js
+      const html = fs.readFileSync(path.join(RENDERER_DIR, file), 'utf-8')
+        .replace('<html lang="fr">', `<html lang="fr" data-theme="${theme}">`)
+        .replace('</head>', `<meta name="divo-dl-path" content="${dlPath}">\n</head>`)
       return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
     }
     return new Response('Not found', { status: 404 })
