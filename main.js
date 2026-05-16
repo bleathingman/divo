@@ -62,6 +62,8 @@ const cosmeticByDomain = new Map()    // "example.com" → ["#ad", ".banner", �
 
 // Filtre les pseudo-classes uBlock/ABP non natives (navigateur ne les comprend pas)
 function isNativeSelector(sel) {
+  // Rejette toute tentative d'injection CSS via accolades ou commentaires
+  if (/[{}]|\/\*|\*\//.test(sel)) return false
   const ext = [':has-text(', ':upward(', ':xpath(', ':matches-css(', ':-abp-',
                ':if(', ':if-not(', '+js(', ':watch-attr(', ':min-text-length(',
                ':matches-path(', ':others(']
@@ -643,7 +645,8 @@ ipcMain.handle('install-update', async () => {
   } catch { return { ok: false, reason: 'bad-url' } }
 
   const isLinux = process.platform === 'linux'
-  const fileName = isLinux ? 'Divo-update.AppImage' : 'Divo-Setup-update.exe'
+  const rand = crypto.randomBytes(8).toString('hex')
+  const fileName = isLinux ? `Divo-update-${rand}.AppImage` : `Divo-Setup-update-${rand}.exe`
   const tmpPath = path.join(app.getPath('temp'), fileName)
   try {
     mainWindow?.webContents.send('update-progress', 5)
@@ -653,7 +656,7 @@ ipcMain.handle('install-update', async () => {
     const buffer = Buffer.from(await res.arrayBuffer())
     if (buffer.length < 1024) throw new Error('Fichier téléchargé trop petit')
     mainWindow?.webContents.send('update-progress', 90)
-    fs.writeFileSync(tmpPath, buffer)
+    fs.writeFileSync(tmpPath, buffer, { flag: 'wx' })
     mainWindow?.webContents.send('update-progress', 100)
 
     if (isLinux) {
@@ -828,13 +831,13 @@ app.whenReady().then(async () => {
     return new Response('Not found', { status: 404 })
   })
 
-  // ── Téléchargements
+  // ── Téléchargements — appliqués sur toutes les sessions (persist:divo + private:incognito)
   const safeFilename = raw =>
     path.basename(String(raw || 'download'))
       .replace(/[\x00-\x1f<>"'/\\|?*]/g, '_')
       .slice(0, 200) || 'download'
 
-  session.defaultSession.on('will-download', (_, item) => {
+  const willDownloadHandler = (_, item) => {
     const id = Date.now()
     const dlDir = config.downloadPath || app.getPath('downloads')
     const filename = safeFilename(item.getFilename())
@@ -848,7 +851,8 @@ app.whenReady().then(async () => {
       mainWindow.webContents.send('dl-done', { id, state, filename, savePath: item.getSavePath() })
       downloadItems.delete(id)
     })
-  })
+  }
+  for (const s of getProtectedSessions()) s.on('will-download', willDownloadHandler)
 
   // ── Permissions — appliquées sur toutes les sessions webview
   // Accordées silencieusement (tous les navigateurs font pareil)

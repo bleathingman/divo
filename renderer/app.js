@@ -12,7 +12,11 @@ const SETTINGS_URL = window.bridge.settingsUrl
 // ── DOM
 const webview          = document.getElementById('webview')
 const webviewPrivate   = document.getElementById('webview-private')
-const webviewBg        = document.getElementById('webview-bg')
+
+// SEC-307 — fallback favicon : masque les <img> cassées sans onerror inline (bloqué par CSP)
+document.addEventListener('error', e => {
+  if (e.target.tagName === 'IMG') e.target.style.display = 'none'
+}, true)
 const updateBar           = document.getElementById('update-bar')
 const updateMsg           = document.getElementById('update-msg')
 const updateInstallBtn    = document.getElementById('update-install-btn')
@@ -368,7 +372,7 @@ function renderTopTabs() {
     li.className = 'top-tab' + (t.id === activeTabId ? ' active' : '') + (t.unloaded ? ' unloaded' : '')
     li.dataset.id = t.id
     const fav = safeFavicon(t.favicon)
-      ? `<img class="top-tab-favicon" src="${safeFavicon(t.favicon)}" draggable="false" onerror="this.style.display='none'">`
+      ? `<img class="top-tab-favicon" src="${safeFavicon(t.favicon)}" draggable="false">`
       : `<div class="top-tab-fav-placeholder"></div>`
     li.innerHTML = `${fav}<span class="top-tab-title">${escapeHtml(t.title) || 'Nouvel onglet'}</span><button class="top-tab-close" data-close="${t.id}">✕</button>`
     frag.appendChild(li)
@@ -984,7 +988,7 @@ function buildFavRow(fav, indented) {
   li.dataset.id = fav.id
   li.dataset.favType = 'url'
   const faviconHtml = safeFavicon(fav.favicon)
-    ? `<img class="tab-favicon" src="${safeFavicon(fav.favicon)}" loading="lazy" draggable="false" onerror="this.style.display='none'">`
+    ? `<img class="tab-favicon" src="${safeFavicon(fav.favicon)}" loading="lazy" draggable="false">`
     : `<div class="tab-favicon-placeholder"></div>`
   li.innerHTML = `${faviconHtml}<span class="tab-title">${escapeHtml(fav.title)}</span><button class="tab-close" data-remove-fav="${fav.id}">✕</button>`
   return li
@@ -1326,7 +1330,7 @@ function renderArchived() {
     li.className = 'tab-item archived-tab'
     li.dataset.id = t.id
     const faviconHtml = safeFavicon(t.favicon)
-      ? `<img class="tab-favicon" src="${safeFavicon(t.favicon)}" loading="lazy" draggable="false" onerror="this.style.display='none'">`
+      ? `<img class="tab-favicon" src="${safeFavicon(t.favicon)}" loading="lazy" draggable="false">`
       : `<div class="tab-favicon-placeholder"></div>`
     li.innerHTML = `${faviconHtml}<span class="tab-title">${escapeHtml(t.title)}</span><button class="tab-close" data-del="${t.id}">✕</button>`
     li.addEventListener('click', e => { if (!e.target.closest('[data-del]')) unarchiveTab(t.id) })
@@ -1373,7 +1377,7 @@ function renderEssentials() {
     li.className = 'tab-item' + (activeEssentialId === e.id ? ' active' : '')
     li.dataset.id = e.id; li.draggable = true
     li.innerHTML = `
-      ${safeFavicon(e.favicon) ? `<img class="tab-favicon" src="${safeFavicon(e.favicon)}" loading="lazy" draggable="false" onerror="this.style.display='none'">` : '<div class="tab-favicon-placeholder"></div>'}
+      ${safeFavicon(e.favicon) ? `<img class="tab-favicon" src="${safeFavicon(e.favicon)}" loading="lazy" draggable="false">` : '<div class="tab-favicon-placeholder"></div>'}
       <span class="tab-title">${escapeHtml(e.title)}</span>
       <button class="tab-close" data-unload-ess="${e.id}">✕</button>
     `
@@ -1392,7 +1396,7 @@ function buildTabItem(t) {
   const faviconHtml = t.private
     ? `<div class="tab-favicon-private">${ICON_LOCK}</div>`
     : safeFavicon(t.favicon)
-      ? `<img class="tab-favicon" src="${safeFavicon(t.favicon)}" loading="lazy" draggable="false" onerror="this.style.display='none'">`
+      ? `<img class="tab-favicon" src="${safeFavicon(t.favicon)}" loading="lazy" draggable="false">`
       : `<div class="tab-favicon-placeholder"></div>`
   li.innerHTML = `
     ${faviconHtml}
@@ -1533,7 +1537,7 @@ function renderHistory() {
     }
     const el = document.createElement('div'); el.className = 'history-item'
     el.innerHTML = `
-      ${safeFavicon(item.favicon) ? `<img src="${safeFavicon(item.favicon)}" onerror="this.style.display='none'">` : '<div style="width:15px"></div>'}
+      ${safeFavicon(item.favicon) ? `<img src="${safeFavicon(item.favicon)}">` : '<div style="width:15px"></div>'}
       <div class="history-item-info">
         <div class="history-item-title">${escapeHtml(item.title)}</div>
         <div class="history-item-url">${escapeHtml(item.url)}</div>
