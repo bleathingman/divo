@@ -5,7 +5,6 @@ on:
     tags:
       - 'v*'
 
-# Permissions minimales au niveau workflow (chaque job peut restreindre davantage)
 permissions:
   contents: write
   id-token: write
@@ -42,10 +41,73 @@ jobs:
           node-version: 20
           cache: 'npm'
       - run: npm ci
-      - name: Build Windows
+
+      - name: Build Windows (non signé)
         run: npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Signature Authenticode via SignPath REST API
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $orgId  = '549bac04-15c1-411d-be59-a665db738d4f'
+          $base   = "https://app.signpath.io/API/v1/$orgId"
+          $bearer = @{ Authorization = "Bearer $env:SIGNPATH_API_TOKEN" }
+
+          # 1. ZIP les .exe à signer
+          $zip = 'dist\to-sign.zip'
+          Compress-Archive -Path dist\*.exe -DestinationPath $zip -Force
+          Write-Host "Archive créée : $zip"
+
+          # 2. Soumettre la demande de signature via multipart/form-data
+          Add-Type -AssemblyName System.Net.Http
+          $client = [System.Net.Http.HttpClient]::new()
+          $client.DefaultRequestHeaders.Authorization = `
+            [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $env:SIGNPATH_API_TOKEN)
+
+          $form = [System.Net.Http.MultipartFormDataContent]::new()
+          $form.Add([System.Net.Http.StringContent]::new('divo'),           'ProjectSlug')
+          $form.Add([System.Net.Http.StringContent]::new('test-signing'),   'SigningPolicySlug')
+          $form.Add([System.Net.Http.StringContent]::new('initial-version'),'ArtifactConfigurationSlug')
+
+          $bytes   = [System.IO.File]::ReadAllBytes((Resolve-Path $zip))
+          $content = [System.Net.Http.ByteArrayContent]::new($bytes)
+          $content.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/zip')
+          $form.Add($content, 'Artifact', 'artifact.zip')
+
+          $resp = $client.PostAsync("$base/SigningRequests", $form).GetAwaiter().GetResult()
+          $body = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+
+          if (-not $resp.IsSuccessStatusCode) {
+            Write-Error "Soumission SignPath échouée ($($resp.StatusCode)) : $($body | ConvertTo-Json)"
+            exit 1
+          }
+          $id = $body.signingRequestId
+          Write-Host "Demande soumise : $id"
+
+          # 3. Attendre la fin (max 15 min)
+          $deadline = (Get-Date).AddMinutes(15)
+          do {
+            Start-Sleep -Seconds 15
+            $status = Invoke-RestMethod "$base/SigningRequests/$id" -Headers $bearer
+            Write-Host "Statut : $($status.status)"
+            if ((Get-Date) -gt $deadline) { Write-Error "Timeout SignPath"; exit 1 }
+          } while ($status.status -in @('InProgress','WaitingForApproval','Queued'))
+
+          if ($status.status -ne 'Completed') {
+            Write-Error "Signature échouée : $($status.status)"; exit 1
+          }
+
+          # 4. Télécharger et extraire les .exe signés
+          $signed = 'dist\signed.zip'
+          Invoke-WebRequest $status.signedArtifactLink -Headers $bearer -OutFile $signed
+          Expand-Archive $signed -DestinationPath 'dist\signed' -Force
+          Copy-Item 'dist\signed\*.exe' 'dist\' -Force
+          Remove-Item $zip, $signed, 'dist\signed' -Recurse -Force
+          Write-Host "Signature terminée avec succès"
+
       - name: SHA256SUMS + upload Windows
         run: |
           $files = Get-ChildItem dist\*.exe | Select-Object -ExpandProperty FullName
@@ -59,6 +121,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Attestation de provenance SLSA (Windows)
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
         with:
