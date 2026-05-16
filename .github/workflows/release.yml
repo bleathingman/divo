@@ -47,65 +47,40 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Signature Authenticode via SignPath REST API
+      - name: Lister les fichiers dist (debug nommage)
+        shell: pwsh
+        run: Get-ChildItem dist\*.exe | Select-Object Name, Length
+
+      - name: Signature Authenticode via module SignPath officiel
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
         run: |
-          $orgId  = '549bac04-15c1-411d-be59-a665db738d4f'
-          $base   = "https://app.signpath.io/API/v1/$orgId"
-          $bearer = @{ Authorization = "Bearer $env:SIGNPATH_API_TOKEN" }
+          Install-Module -Name SignPath -Force -Scope CurrentUser -ErrorAction Stop
+          Import-Module SignPath
 
-          # 1. ZIP les .exe à signer
-          $zip = 'dist\to-sign.zip'
-          Compress-Archive -Path dist\*.exe -DestinationPath $zip -Force
-          Write-Host "Archive créée : $zip"
-
-          # 2. Soumettre la demande de signature via multipart/form-data
-          Add-Type -AssemblyName System.Net.Http
-          $client = [System.Net.Http.HttpClient]::new()
-          $client.DefaultRequestHeaders.Authorization = `
-            [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $env:SIGNPATH_API_TOKEN)
-
-          $form = [System.Net.Http.MultipartFormDataContent]::new()
-          $form.Add([System.Net.Http.StringContent]::new('divo'), 'ProjectSlug')
-          $form.Add([System.Net.Http.StringContent]::new('test-signing'), 'SigningPolicySlug')
-          $form.Add([System.Net.Http.StringContent]::new('initial'), 'ArtifactConfigurationSlug')
-
-          $bytes   = [System.IO.File]::ReadAllBytes((Resolve-Path $zip))
-          $content = [System.Net.Http.ByteArrayContent]::new($bytes)
-          $content.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/zip')
-          $form.Add($content, 'Artifact', 'artifact.zip')
-
-          $resp = $client.PostAsync("$base/SigningRequests", $form).GetAwaiter().GetResult()
-          $body = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
-
-          if (-not $resp.IsSuccessStatusCode) {
-            Write-Error "Soumission SignPath échouée ($($resp.StatusCode)) : $($body | ConvertTo-Json)"
-            exit 1
-          }
-          $id = $body.signingRequestId
-          Write-Host "Demande soumise : $id"
-
-          # 3. Attendre la fin (max 15 min)
-          $deadline = (Get-Date).AddMinutes(15)
-          do {
-            Start-Sleep -Seconds 15
-            $status = Invoke-RestMethod "$base/SigningRequests/$id" -Headers $bearer
-            Write-Host "Statut : $($status.status)"
-            if ((Get-Date) -gt $deadline) { Write-Error "Timeout SignPath"; exit 1 }
-          } while ($status.status -in @('InProgress','WaitingForApproval','Queued'))
-
-          if ($status.status -ne 'Completed') {
-            Write-Host "=== Détails SignPath ===" -ForegroundColor Red
-            Write-Host ($status | ConvertTo-Json -Depth 5)
-            Write-Error "Signature échouée : $($status.status)"
-            exit 1
-          }
-
-          # 4. Télécharger et extraire les .exe signés
+          $zip    = 'dist\to-sign.zip'
           $signed = 'dist\signed.zip'
-          Invoke-WebRequest $status.signedArtifactLink -Headers $bearer -OutFile $signed
+
+          # ZIP des .exe et log du contenu pour debug
+          Compress-Archive -Path dist\*.exe -DestinationPath $zip -Force
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          Write-Host "Fichiers dans le ZIP :"
+          [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path).Entries |
+            Select-Object Name, Length | Format-Table
+
+          # Soumettre et attendre (le module gère WaitingForApproval automatiquement)
+          Submit-SigningRequest `
+            -InputArtifactPath         $zip `
+            -OutputArtifactPath        $signed `
+            -ApiToken                  $env:SIGNPATH_API_TOKEN `
+            -OrganizationId            '549bac04-15c1-411d-be59-a665db738d4f' `
+            -ProjectSlug               'divo' `
+            -SigningPolicySlug         'test-signing' `
+            -ArtifactConfigurationSlug 'initial' `
+            -WaitForCompletion
+
+          # Extraire les .exe signés et remplacer dans dist/
           Expand-Archive $signed -DestinationPath 'dist\signed' -Force
           Copy-Item 'dist\signed\*.exe' 'dist\' -Force
           Remove-Item $zip, $signed, 'dist\signed' -Recurse -Force
