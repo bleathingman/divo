@@ -702,12 +702,17 @@ ipcMain.handle('install-update', async () => {
       fs.writeFileSync(scriptPath, script, { flag: 'wx', mode: 0o700 })
       spawn(scriptPath, [tmpPath, currentAppImage], { detached: true, stdio: 'ignore', shell: false }).unref()
     } else {
-      // PowerShell : lance l'installeur NSIS en silencieux (/S), attend la fin,
-      // puis relance Divo depuis le même chemin (NSIS met à jour l'exe sur place).
-      // Les chemins passent via $env: → aucun risque d'injection dans la commande.
-      const ps =
-        '$i=Start-Process -FilePath $env:DIVO_INST -ArgumentList \'/S\' -Wait -PassThru;' +
-        'if($i.ExitCode -eq 0){Start-Sleep -Milliseconds 800;Start-Process -FilePath $env:DIVO_EXE}'
+      // PowerShell : attend 2s que Divo soit complètement libéré par Windows,
+      // installe en silencieux (/S), relance si succès.
+      // Fallback : si NSIS échoue (exe encore verrouillé, droits…), ouvre l'installeur
+      // en mode normal pour que l'utilisateur puisse finir manuellement.
+      // Les chemins passent via $env: → aucune injection possible.
+      const ps = [
+        'Start-Sleep -Seconds 2',
+        '$i = Start-Process -FilePath $env:DIVO_INST -ArgumentList \'/S\' -Wait -PassThru',
+        'if ($i.ExitCode -eq 0) { Start-Sleep -Milliseconds 1500; Start-Process -FilePath $env:DIVO_EXE }',
+        'else { Start-Process -FilePath $env:DIVO_INST }',
+      ].join('; ')
       spawn('powershell.exe', ['-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps], {
         detached: true, stdio: 'ignore',
         env: { ...process.env, DIVO_INST: tmpPath, DIVO_EXE: process.execPath }
