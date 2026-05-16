@@ -569,14 +569,33 @@ function wireWebviewEvents(el) {
 
   el.addEventListener('page-title-updated', e => {
     const currentUrl = el.getURL()
+
+    // Installation extension — autorisée depuis CWS uniquement (pas n'importe quelle page)
+    if (e.title.startsWith('divo-action:install-extension:')) {
+      try { if (new URL(currentUrl).hostname !== 'chromewebstore.google.com' && !isSpecial(currentUrl)) return } catch { return }
+      const extId = e.title.split(':')[2]
+      if (/^[a-z]{32}$/.test(extId)) {
+        window.bridge.installExtById(extId).then(res => {
+          if (res.ok) {
+            createTab('divo://extensions')
+          } else if (res.reason === 'mv3-unsupported') {
+            alert('Cette extension utilise Manifest V3 (service worker) qui n\'est pas supporté par Divo.\n\nSeules les extensions MV2 fonctionnent pour l\'instant.')
+          } else if (res.reason) {
+            alert('Erreur d\'installation : ' + res.reason)
+          }
+        })
+      }
+      return
+    }
+
     if (e.title.startsWith('divo-action:')) {
       if (isSpecial(currentUrl)) {
         const action = e.title.replace('divo-action:', '')
-        if (action.startsWith('adblock:'))         window.bridge.adblockToggle(action.endsWith('true'))
-        if (action.startsWith('theme:'))            applyTheme(action.replace('theme:', ''))
-        if (action.startsWith('layout:'))           applyLayout(action.replace('layout:', ''))
-        if (action.startsWith('web-dark:'))         window.bridge.webDarkModeToggle(action.endsWith('true'))
-        if (action.startsWith('https-upgrade:'))    window.bridge.httpsUpgradeToggle(action.endsWith('true'))
+        if (action.startsWith('adblock:'))           window.bridge.adblockToggle(action.endsWith('true'))
+        if (action.startsWith('theme:'))              applyTheme(action.replace('theme:', ''))
+        if (action.startsWith('layout:'))             applyLayout(action.replace('layout:', ''))
+        if (action.startsWith('web-dark:'))           window.bridge.webDarkModeToggle(action.endsWith('true'))
+        if (action.startsWith('https-upgrade:'))      window.bridge.httpsUpgradeToggle(action.endsWith('true'))
         if (action.startsWith('pick-download-path')) {
           window.bridge.pickDownloadPath().then(newPath => {
             if (!newPath || !el.__ready) return
@@ -587,20 +606,6 @@ function wireWebviewEvents(el) {
             `).catch(() => {})
           })
         }
-      }
-      return
-    }
-    // Action réservée exclusivement à la page settings (garde plus strict que isSpecial)
-    // La vraie protection contre l'abus est le dialog.showMessageBox côté main
-    // Installation d'extension depuis la Chrome Web Store
-    if (e.title.startsWith('divo-action:install-extension:')) {
-      const extId = e.title.split(':')[2]
-      if (/^[a-z]{32}$/.test(extId)) {
-        window.bridge.installExtById(extId).then(res => {
-          if (res.ok) {
-            createTab('divo://extensions')
-          }
-        })
       }
       return
     }

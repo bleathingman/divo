@@ -255,18 +255,40 @@ function extractZip(zipPath, destDir) {
   })
 }
 
+// Télécharge un CRX via Node.js https natif (évite les intercepteurs Electron)
+function downloadCrx(startUrl) {
+  return new Promise((resolve, reject) => {
+    const https = require('https')
+    const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
+    function doGet(u, hops) {
+      if (hops > 8) { reject(new Error('Trop de redirections')); return }
+      try { new URL(u) } catch { reject(new Error('URL invalide')); return }
+      https.get(u, { headers: { 'User-Agent': UA, 'Accept': '*/*' } }, res => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume(); doGet(new URL(res.headers.location, u).href, hops + 1); return
+        }
+        if (res.statusCode !== 200) { res.resume(); reject(new Error('HTTP ' + res.statusCode)); return }
+        const chunks = []
+        res.on('data', c => chunks.push(c))
+        res.on('end', () => resolve(Buffer.concat(chunks)))
+        res.on('error', reject)
+      }).on('error', reject)
+    }
+    doGet(startUrl, 0)
+  })
+}
+
 // Télécharge et installe un CRX depuis son ID Chrome Web Store
 async function installExtensionById(extId) {
   const url = `https://clients2.google.com/service/update2/crx?` +
-    `response=redirect&prodversion=130.0.0.0&acceptformat=crx3,crx2` +
+    `response=redirect&os=win&arch=x64&nacl_arch=x86-64&prod=chromiumcrx` +
+    `&prodchannel=stable&prodversion=136.0.0.0&acceptformat=crx3,crx2` +
     `&x=id%3D${extId}%26uc`
   const crxPath  = path.join(app.getPath('temp'), `ext-${extId}.crx`)
   const zipPath  = path.join(app.getPath('temp'), `ext-${extId}.zip`)
   const destDir  = path.join(USER_EXT_DIR, extId)
 
-  const res = await net.fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  const buffer = Buffer.from(await res.arrayBuffer())
+  const buffer = await downloadCrx(url)
   if (buffer.length < 1024) throw new Error('CRX trop petit')
 
   fs.writeFileSync(crxPath, crxToZip(buffer))
@@ -276,6 +298,12 @@ async function installExtensionById(extId) {
 
   const manifest = readExtManifest(destDir)
   if (!manifest) throw new Error('manifest.json introuvable après extraction')
+
+  // MV3 service worker — non supporté par Electron
+  if (manifest.manifest_version >= 3 && manifest.background?.service_worker) {
+    try { fs.rmSync(destDir, { recursive: true, force: true }) } catch {}
+    throw new Error('mv3-unsupported')
+  }
 
   // Charger pour toutes les sessions
   for (const s of getProtectedSessions()) {
@@ -372,25 +400,51 @@ ipcMain.handle('toggle-user-extension', async (_, extId, enabled) => {
 // Script injecté sur la Chrome Web Store pour remplacer "Add to Chrome" → "Add to Divo"
 const CWS_INJECT_JS = `(function(){
   if (window.__dvCws) return; window.__dvCws = 1;
-  const m = location.pathname.match(/\\/detail\\/[^/]+\\/([a-z]{32})/);
-  if (!m) return;
-  const extId = m[1];
-  function patch() {
-    document.querySelectorAll('button').forEach(btn => {
-      if (btn.__dvP) return;
-      const t = btn.textContent.trim();
-      if (/add to chrome/i.test(t) || /ajouter/i.test(t)) {
-        btn.__dvP = true;
-        btn.addEventListener('click', e => {
-          e.preventDefault(); e.stopPropagation();
-          document.title = 'divo-action:install-extension:' + extId;
-        }, true);
-        btn.textContent = btn.textContent.replace(/add to chrome/gi,'Add to Divo').replace(/ajouter/gi,'Ajouter à Divo');
-      }
-    });
+
+  function getExtId() {
+    const m = location.pathname.match(/\\/detail\\/[^/]+\\/([a-z]{32})/);
+    return m ? m[1] : null;
   }
-  patch();
-  new MutationObserver(patch).observe(document.body, { childList: true, subtree: true });
+
+  function triggerInstall(extId) {
+    document.title = 'divo-action:install-extension:' + extId;
+  }
+
+  function injectBtn() {
+    const extId = getExtId();
+    if (!extId) return;
+    if (document.getElementById('__divo_add')) return;
+
+    // Cherche le bouton "Add to Chrome" / "Ajouter à Chrome" (toutes langues)
+    const addBtn = Array.from(document.querySelectorAll('button,[role="button"]')).find(el => {
+      const t = (el.textContent + ' ' + (el.getAttribute('aria-label') || '')).trim();
+      return /add to chrome|ajouter|hinzufügen|añadir|aggiungi/i.test(t);
+    });
+
+    // Injecte notre bouton "Add to Divo"
+    const btn = document.createElement('button');
+    btn.id = '__divo_add';
+    btn.textContent = 'Add to Divo';
+    btn.style.cssText = 'background:#0a84ff;color:#fff;border:none;border-radius:20px;padding:8px 22px;font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;margin:4px 0 4px 8px;';
+    btn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); triggerInstall(extId); }, true);
+
+    if (addBtn) {
+      // Remplace le texte du bouton original et intercepte son clic
+      addBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); triggerInstall(extId); }, true);
+      addBtn.textContent = addBtn.textContent
+        .replace(/add to chrome/gi, 'Add to Divo')
+        .replace(/ajouter à chrome/gi, 'Ajouter à Divo')
+        .replace(/ajouter/gi, 'Ajouter à Divo');
+      addBtn.parentNode?.insertBefore(btn, addBtn.nextSibling);
+    } else {
+      // Fallback : bouton flottant toujours visible
+      btn.style.cssText += 'position:fixed;top:64px;right:16px;z-index:2147483647;box-shadow:0 2px 12px rgba(0,0,0,.35);';
+      document.body.appendChild(btn);
+    }
+  }
+
+  injectBtn();
+  new MutationObserver(injectBtn).observe(document.body, { childList: true, subtree: true });
 })()`
 
 // ── Handlers nommés (appliqués sur chaque session)
@@ -1206,8 +1260,32 @@ app.whenReady().then(async () => {
     })
   }
 
-  // ── Nouvelles fenêtres → onglets + injection pub
+  // ── Polyfill extensions : chrome.storage.sync → chrome.storage.local (non supporté dans Electron)
+  const EXT_STORAGE_POLYFILL = `(function(){
+    try {
+      if (typeof chrome === 'undefined' || !chrome.storage) return;
+      if (!chrome.storage.sync) {
+        Object.defineProperty(chrome.storage, 'sync', { get: () => chrome.storage.local, configurable: true });
+      }
+      if (!chrome.storage.managed) {
+        const noop = { get: (k,cb) => { if(cb) cb({}); return Promise.resolve({}) },
+                       set: (v,cb) => { if(cb) cb(); return Promise.resolve() },
+                       remove: (k,cb) => { if(cb) cb(); return Promise.resolve() },
+                       clear: (cb) => { if(cb) cb(); return Promise.resolve() },
+                       onChanged: { addListener:()=>{}, removeListener:()=>{}, hasListener:()=>false } };
+        Object.defineProperty(chrome.storage, 'managed', { get: () => noop, configurable: true });
+      }
+    } catch {}
+  })()`
+
   app.on('web-contents-created', (_, contents) => {
+    // Injecter le polyfill chrome.storage dans les background pages d'extensions
+    if (contents.getType() === 'backgroundPage') {
+      contents.on('dom-ready', () => {
+        contents.executeJavaScript(EXT_STORAGE_POLYFILL).catch(() => {})
+      })
+    }
+
     if (contents.getType() === 'webview') {
       // Liens custom protocol (steam://, discord://, epic://, etc.) → ouvrir dans l'OS
       contents.on('will-navigate', (event, url) => {
@@ -1238,7 +1316,7 @@ app.whenReady().then(async () => {
 
       contents.on('did-finish-load', () => {
         const url = contents.getURL()
-        if (!url || url.startsWith('chrome') || url.startsWith('arc') || url.startsWith('file')) return
+        if (!url || url === 'about:blank' || url.startsWith('chrome') || url.startsWith('arc') || url.startsWith('file')) return
 
         if (config.adblock) {
           // CSS génériques (curatés + EasyList)
@@ -1285,9 +1363,13 @@ app.whenReady().then(async () => {
         }
       })
 
-      // Navigation SPA : re-déclencher le dark mode si la page change sans rechargement
+      // Navigation SPA : re-injecter CWS + dark mode
       contents.on('did-navigate-in-page', (_, url, isMainFrame) => {
-        if (!isMainFrame || !config.webDarkMode || !url || url.startsWith('divo:')) return
+        if (!isMainFrame || !url || url.startsWith('divo:')) return
+        if (url.includes('chromewebstore.google.com/detail/')) {
+          contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
+        }
+        if (!config.webDarkMode) return
         try {
           const hostname = new URL(url).hostname.replace(/^www\./, '')
           const skip = WEB_DARK_SKIP.some(h => hostname === h || hostname.endsWith('.' + h))
