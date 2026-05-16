@@ -1,6 +1,6 @@
 {
   "name": "divo",
-  "version": "1.0.36",
+  "version": "1.1.1",
   "description": "Divo Browser",
   "author": "Divh",
   "main": "main.js",
@@ -10,8 +10,11 @@
     "build:linux": "electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^29.0.0",
-    "electron-builder": "^24.13.3"
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1"
+  },
+  "overrides": {
+    "tar": "^7.5.12"
   },
   "build": {
     "appId": "com.divh.divo",
@@ -28,19 +31,55 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis",     "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.png",
       "protocols": [
-        { "name": "Divo Browser", "schemes": ["http", "https"] }
+        {
+          "name": "Divo Browser",
+          "schemes": [
+            "http",
+            "https"
+          ]
+        }
       ],
       "fileAssociations": [
-        { "ext": "html",  "name": "Divo HTML Document", "description": "Ouvrir avec Divo" },
-        { "ext": "htm",   "name": "Divo HTML Document", "description": "Ouvrir avec Divo" },
-        { "ext": "xhtml", "name": "Divo HTML Document", "description": "Ouvrir avec Divo" },
-        { "ext": "shtml", "name": "Divo HTML Document", "description": "Ouvrir avec Divo" },
-        { "ext": "xht",   "name": "Divo HTML Document", "description": "Ouvrir avec Divo" }
+        {
+          "ext": "html",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        },
+        {
+          "ext": "htm",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        },
+        {
+          "ext": "xhtml",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        },
+        {
+          "ext": "shtml",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        },
+        {
+          "ext": "xht",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        }
       ]
     },
     "nsis": {
@@ -52,7 +91,12 @@
     },
     "linux": {
       "target": [
-        { "target": "AppImage", "arch": ["x64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.png",
       "category": "Network"
