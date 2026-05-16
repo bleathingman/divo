@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('bridge', {
   onUpdateAvailable:    (cb) => ipcRenderer.on('update-available',    (_, d) => cb(d)),
   onUpdateProgress:     (cb) => ipcRenderer.on('update-progress',     (_, p) => cb(p)),
   installUpdate:        ()    => ipcRenderer.invoke('install-update'),
+  getUpdateStatus:      ()    => ipcRenderer.invoke('get-update-status'),
+  checkUpdateNow:       ()    => ipcRenderer.invoke('check-update-now'),
   isDefaultBrowser:     ()    => ipcRenderer.invoke('is-default-browser'),
   setDefaultBrowser:    ()    => ipcRenderer.invoke('set-default-browser'),
   onNotDefaultBrowser:  (cb)  => ipcRenderer.on('not-default-browser', () => cb()),

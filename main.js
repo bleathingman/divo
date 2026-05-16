@@ -600,7 +600,8 @@ const WEB_DARK_SKIP = [
 const REPO = 'bleathingman/divo'
 const UPDATE_INTERVAL = 4 * 60 * 60 * 1000
 const ALLOWED_UPDATE_HOSTS = new Set(['github.com', 'objects.githubusercontent.com'])
-let pendingUpdateUrl = null
+let pendingUpdateUrl     = null
+let pendingUpdateVersion = null
 
 function semverGt(a, b) {
   const pa = a.split('.').map(Number)
@@ -625,10 +626,20 @@ async function checkForUpdate() {
       ? rel.assets?.find(a => /\.AppImage$/i.test(a.name))
       : rel.assets?.find(a => /Setup.*\.exe$/i.test(a.name))
     // L'URL reste côté main — le renderer ne la reçoit jamais
-    pendingUpdateUrl = asset?.browser_download_url || null
+    pendingUpdateUrl     = asset?.browser_download_url || null
+    pendingUpdateVersion = latest
     mainWindow?.webContents.send('update-available', { version: latest })
   } catch (e) { console.error('checkForUpdate error', e) }
 }
+
+ipcMain.handle('get-update-status', () =>
+  pendingUpdateVersion ? { version: pendingUpdateVersion } : null
+)
+
+ipcMain.handle('check-update-now', async () => {
+  await checkForUpdate()
+  return pendingUpdateVersion ? { version: pendingUpdateVersion } : null
+})
 
 ipcMain.handle('install-update', async () => {
   const url = pendingUpdateUrl

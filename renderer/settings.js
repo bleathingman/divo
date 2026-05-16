@@ -38,3 +38,10 @@ document.getElementById('web-dark-toggle').addEventListener('change', function()
 document.getElementById('default-browser-btn').addEventListener('click', function() {
   document.title = 'divo-settings-action:set-default-browser'
 })
+document.getElementById('update-action-btn').addEventListener('click', function() {
+  if (this.dataset.state === 'available') {
+    document.title = 'divo-settings-action:install-update'
+  } else {
+    document.title = 'divo-settings-action:check-update:' + Date.now()
+  }
+})

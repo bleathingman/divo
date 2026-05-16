@@ -530,6 +530,19 @@ function wireWebviewEvents(el) {
               defBtn.disabled = false;
             }
           }
+          const _uBtn = document.getElementById('update-action-btn');
+          const _uTxt = document.getElementById('update-status-text');
+          if (_uBtn && _uTxt) {
+            if (${!!pendingUpdate}) {
+              _uTxt.textContent = 'v${pendingUpdate?.version ?? ''} disponible';
+              _uBtn.textContent = 'Installer v${pendingUpdate?.version ?? ''}';
+              _uBtn.dataset.state = 'available';
+            } else {
+              _uTxt.textContent = 'Divo est à jour';
+              _uBtn.textContent = 'Vérifier';
+              _uBtn.dataset.state = 'idle';
+            }
+          }
         `).catch(() => {})
       }, 300)
     }
@@ -576,6 +589,32 @@ function wireWebviewEvents(el) {
     // La vraie protection contre l'abus est le dialog.showMessageBox côté main
     if (e.title === 'divo-settings-action:set-default-browser') {
       if (isSettings(currentUrl)) window.bridge.setDefaultBrowser()
+      return
+    }
+    if (e.title === 'divo-settings-action:check-update' && isSettings(currentUrl)) {
+      el.executeJavaScript(`
+        const b = document.getElementById('update-action-btn');
+        if (b) { b.textContent = 'Vérification…'; b.disabled = true; }
+      `).catch(() => {})
+      window.bridge.checkUpdateNow().then(upd => {
+        if (upd) {
+          pendingUpdate = upd
+          showUpdateBar(upd.version)
+        }
+        const vTxt  = upd ? `v${upd.version} disponible` : 'Divo est à jour'
+        const bTxt  = upd ? `Installer v${upd.version}`  : 'Vérifier'
+        const state = upd ? 'available' : 'idle'
+        el.executeJavaScript(`
+          const b = document.getElementById('update-action-btn');
+          const t = document.getElementById('update-status-text');
+          if (b) { b.textContent = ${JSON.stringify(bTxt)}; b.dataset.state = ${JSON.stringify(state)}; b.disabled = false; }
+          if (t) t.textContent = ${JSON.stringify(vTxt)};
+        `).catch(() => {})
+      })
+      return
+    }
+    if (e.title === 'divo-settings-action:install-update' && isSettings(currentUrl)) {
+      if (pendingUpdate) updateInstallBtn.click()
       return
     }
     if (e.title.startsWith('divo-settings:')) {
@@ -2156,12 +2195,17 @@ if (activeItem) {
 }
 
 // ── Auto-update
-let updateAvailable = false
+let pendingUpdate  = null   // { version } ou null
+let snoozeTimer    = null
 
-window.bridge.onUpdateAvailable(({ version }) => {
-  updateAvailable = true
+function showUpdateBar(version) {
   updateMsg.textContent = `Divo ${version} disponible`
   updateBar.classList.add('visible')
+}
+
+window.bridge.onUpdateAvailable(({ version }) => {
+  pendingUpdate = { version }
+  showUpdateBar(version)
 })
 
 window.bridge.onUpdateProgress(pct => {
@@ -2169,7 +2213,7 @@ window.bridge.onUpdateProgress(pct => {
 })
 
 updateInstallBtn.addEventListener('click', async () => {
-  if (!updateAvailable) return
+  if (!pendingUpdate) return
   updateInstallBtn.disabled = true
   updateInstallBtn.textContent = '0%'
   const result = await window.bridge.installUpdate()
@@ -2180,8 +2224,13 @@ updateInstallBtn.addEventListener('click', async () => {
   }
 })
 
+// "Plus tard" — masque la barre et la réaffiche après 2h si la mise à jour est toujours là
 updateDismissBtn.addEventListener('click', () => {
   updateBar.classList.remove('visible')
+  clearTimeout(snoozeTimer)
+  snoozeTimer = setTimeout(() => {
+    if (pendingUpdate) showUpdateBar(pendingUpdate.version)
+  }, 2 * 60 * 60 * 1000)
 })
 
 // ── Navigateur par défaut
