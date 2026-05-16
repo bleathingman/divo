@@ -1222,6 +1222,11 @@ app.whenReady().then(async () => {
       contents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown' || !mainWindow) return
         const mod = input.control || input.meta
+        // F12 / Ctrl+Shift+I — DevTools de la webview active
+        if (input.code === 'F12' || (mod && input.shift && input.code === 'KeyI')) {
+          contents.openDevTools()
+          return
+        }
         const key = (mod ? 'ctrl+' : '') + (input.shift ? 'shift+' : '') + (input.alt ? 'alt+' : '') + input.code
         if (WEBVIEW_SHORTCUTS.has(key)) {
           event.preventDefault()

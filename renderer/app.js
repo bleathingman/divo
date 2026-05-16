@@ -1758,6 +1758,8 @@ function handleShortcut(mod, shift, alt, code) {
   if (code === 'F5')  { if (webviewReady) wv().reload(); return true }
   if (code === 'F8')  { toggleFocusMode(); return true }
   if (code === 'F11') { window.bridge.toggleFullscreen(); return true }
+  if (code === 'F12') { if (webviewReady) wv().openDevTools(); return true }
+  if (mod && shift && code === 'KeyI') { if (webviewReady) wv().openDevTools(); return true }
   if (alt && code === 'ArrowLeft')  { if (webviewReady && wv().canGoBack())    wv().goBack();    return true }
   if (alt && code === 'ArrowRight') { if (webviewReady && wv().canGoForward()) wv().goForward(); return true }
   if (mod && (code === 'Equal'  || code === 'NumpadAdd'))      { zoomIn();    return true }
@@ -2353,6 +2355,7 @@ favoritesList.addEventListener('drop', e => {
     { type:'action', title:'Plein écran',                icon:'fullscreen', kbd:'F11',      run:() => window.bridge.toggleFullscreen() },
     { type:'action', title:'Afficher / masquer sidebar', icon:'sidebar',    kbd:'Ctrl+B',   run:() => toggleSidebar() },
     { type:'action', title:'Mode focus',                 icon:'focus',      kbd:'F8',       run:() => toggleFocusMode() },
+    { type:'action', title:'Outils développeur',         icon:'devtools',   kbd:'F12',      run:() => { if (webviewReady) wv().openDevTools() } },
     { type:'action', title:'Épingler en Essential',      icon:'pin',        kbd:'Ctrl+D',   run:() => addCurrentPageAsEssential() },
     { type:'action', title:'Focus barre URL',            icon:'url',        kbd:'Ctrl+L',   run:() => { const inp = currentLayout === 'top' ? topUrlInput : urlInput; inp.focus(); inp.select() } },
   ]
@@ -2370,6 +2373,7 @@ favoritesList.addEventListener('drop', e => {
     'pin':        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
     'url':        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
     'focus':      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    'devtools':   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
     'globe':      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
   }
 
