@@ -68,9 +68,9 @@ jobs:
             [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $env:SIGNPATH_API_TOKEN)
 
           $form = [System.Net.Http.MultipartFormDataContent]::new()
-          $form.Add([System.Net.Http.StringContent]::new('divo'),           'ProjectSlug')
-          $form.Add([System.Net.Http.StringContent]::new('test-signing'),   'SigningPolicySlug')
-          $form.Add([System.Net.Http.StringContent]::new('initial-version'),'ArtifactConfigurationSlug')
+          $form.Add([System.Net.Http.StringContent]::new('divo'), 'ProjectSlug')
+          $form.Add([System.Net.Http.StringContent]::new('test-signing'), 'SigningPolicySlug')
+          $form.Add([System.Net.Http.StringContent]::new('initial'), 'ArtifactConfigurationSlug')
 
           $bytes   = [System.IO.File]::ReadAllBytes((Resolve-Path $zip))
           $content = [System.Net.Http.ByteArrayContent]::new($bytes)
