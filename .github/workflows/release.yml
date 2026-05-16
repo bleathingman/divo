@@ -71,12 +71,20 @@ jobs:
           # Signer chaque .exe directement (pas de ZIP — artifact config <pe-file>)
           foreach ($exe in Get-ChildItem dist\*.exe) {
             $out = "dist\signed-$($exe.Name)"
-            Write-Host "Signature : $($exe.Name)"
-            Submit-SigningRequest @params `
-              -InputArtifactPath  $exe.FullName `
-              -OutputArtifactPath $out
-            Move-Item $out $exe.FullName -Force
-            Write-Host "OK : $($exe.Name)"
+            Write-Host "=== Signature : $($exe.Name) ==="
+            try {
+              Submit-SigningRequest @params `
+                -InputArtifactPath  $exe.FullName `
+                -OutputArtifactPath $out `
+                -ErrorAction Stop
+              Move-Item $out $exe.FullName -Force
+              Write-Host "OK : $($exe.Name)"
+            } catch {
+              Write-Host "ERREUR SignPath pour $($exe.Name) :"
+              Write-Host $_.Exception.Message
+              Write-Host $_.Exception.ToString()
+              exit 1
+            }
           }
 
       - name: SHA256SUMS + upload Windows
