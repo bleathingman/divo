@@ -2227,18 +2227,27 @@ window.bridge.onUpdateAvailable(({ version }) => {
 })
 
 window.bridge.onUpdateProgress(pct => {
-  updateInstallBtn.textContent = `${pct}%`
+  if (pct < 0) {
+    // Erreur signalée par main
+    updateInstallBtn.disabled = false
+    updateInstallBtn.textContent = 'Installer'
+    updateMsg.textContent = 'Erreur — réessayer plus tard'
+    return
+  }
+  updateInstallBtn.textContent = pct < 100 ? `${pct}%` : 'Installation…'
 })
 
 updateInstallBtn.addEventListener('click', async () => {
   if (!pendingUpdate) return
   updateInstallBtn.disabled = true
-  updateInstallBtn.textContent = '0%'
+  updateInstallBtn.textContent = 'Téléchargement…'
   const result = await window.bridge.installUpdate()
+  // result.ok = true → app.exit() dans 200ms, on ne revient jamais ici
+  // result.ok = false → erreur, le renderer reçoit aussi update-progress:-1
   if (!result?.ok) {
     updateInstallBtn.disabled = false
     updateInstallBtn.textContent = 'Installer'
-    updateMsg.textContent = 'Erreur — réessayer plus tard'
+    updateMsg.textContent = `Erreur : ${result?.reason || 'réessayer plus tard'}`
   }
 })
 

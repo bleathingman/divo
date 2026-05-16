@@ -840,18 +840,57 @@ ipcMain.handle('install-update', async () => {
   } catch { return { ok: false, reason: 'bad-url' } }
 
   const isLinux = process.platform === 'linux'
-  const rand = crypto.randomBytes(8).toString('hex')
+  const rand    = crypto.randomBytes(8).toString('hex')
   const fileName = isLinux ? `Divo-update-${rand}.AppImage` : `Divo-Setup-update-${rand}.exe`
-  const tmpPath = path.join(app.getPath('temp'), fileName)
+  const tmpPath  = path.join(app.getPath('temp'), fileName)
+
+  // Téléchargement avec progression réelle via Node https (plus fiable que net.fetch pour les gros fichiers)
+  function downloadWithProgress(targetUrl) {
+    return new Promise((resolve, reject) => {
+      const https = require('https')
+      function doGet(u, hops) {
+        if (hops > 6) { reject(new Error('Trop de redirections')); return }
+        try {
+          const parsed = new URL(u)
+          if (parsed.protocol !== 'https:') { reject(new Error('Protocole invalide')); return }
+          if (!ALLOWED_UPDATE_HOSTS.has(parsed.hostname)) { reject(new Error('Hôte non autorisé : ' + parsed.hostname)); return }
+        } catch (e) { reject(e); return }
+
+        https.get(u, { headers: { 'User-Agent': `Divo-Browser/${app.getVersion()}` } }, res => {
+          // Suivre les redirects
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume()
+            doGet(new URL(res.headers.location, u).href, hops + 1)
+            return
+          }
+          if (res.statusCode !== 200) { res.resume(); reject(new Error('HTTP ' + res.statusCode)); return }
+
+          const total  = parseInt(res.headers['content-length'] || '0', 10)
+          const chunks = []
+          let received = 0
+
+          res.on('data', chunk => {
+            chunks.push(chunk)
+            received += chunk.length
+            if (total > 0) {
+              const pct = 5 + Math.round((received / total) * 85)
+              mainWindow?.webContents.send('update-progress', Math.min(pct, 90))
+            }
+          })
+          res.on('end',   () => resolve(Buffer.concat(chunks)))
+          res.on('error', reject)
+        }).on('error', reject)
+      }
+      doGet(targetUrl, 0)
+    })
+  }
+
   try {
     mainWindow?.webContents.send('update-progress', 5)
-    const res = await net.fetch(url)
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    // arrayBuffer() évite les problèmes de streaming sur les redirects GitHub → CDN
-    const buffer = Buffer.from(await res.arrayBuffer())
+    const buffer = await downloadWithProgress(url)
     if (buffer.length < 1024) throw new Error('Fichier téléchargé trop petit')
-    mainWindow?.webContents.send('update-progress', 90)
-    fs.writeFileSync(tmpPath, buffer, { flag: 'wx' })
+    mainWindow?.webContents.send('update-progress', 92)
+    fs.writeFileSync(tmpPath, buffer)   // pas de 'wx' — le nom aléatoire suffit comme garde
     mainWindow?.webContents.send('update-progress', 100)
 
     if (isLinux) {
@@ -903,12 +942,15 @@ ipcMain.handle('install-update', async () => {
       }).unref()
     }
 
-    app.quit()
+    // app.exit() est synchrone et ignore les handlers close/before-quit — plus fiable que app.quit()
+    // Le délai de 200ms laisse le temps à la réponse IPC d'être envoyée au renderer
+    setTimeout(() => app.exit(0), 200)
     return { ok: true }
   } catch (e) {
-    console.error('install-update error', e)
+    console.error('[update] erreur :', e.message)
+    mainWindow?.webContents.send('update-progress', -1)  // signal d'erreur au renderer
     shell.openExternal(`https://github.com/${REPO}/releases/latest`)
-    return { ok: false }
+    return { ok: false, reason: e.message }
   }
 })
 
