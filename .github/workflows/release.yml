@@ -52,6 +52,7 @@ jobs:
         run: Get-ChildItem dist\*.exe | Select-Object Name, Length
 
       - name: Signature Authenticode via module SignPath officiel
+        continue-on-error: true
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -83,7 +84,7 @@ jobs:
               Write-Host "ERREUR SignPath pour $($exe.Name) :"
               Write-Host $_.Exception.Message
               Write-Host $_.Exception.ToString()
-              exit 1
+              Write-Host "Signature ignorée (quota ou erreur) — build continue sans signature."
             }
           }
 
