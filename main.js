@@ -832,12 +832,6 @@ app.whenReady().then(async () => {
         }
       })
 
-      // Boutons souris 4 (retour) et 5 (avant) dans le webview
-      contents.on('input-event', (_, input) => {
-        if (input.type !== 'mouseUp') return
-        if (input.button === 'back'    && contents.canGoBack())    contents.goBack()
-        if (input.button === 'forward' && contents.canGoForward()) contents.goForward()
-      })
       contents.on('did-finish-load', () => {
         const url = contents.getURL()
         if (!url || url.startsWith('chrome') || url.startsWith('arc') || url.startsWith('file')) return
@@ -863,6 +857,15 @@ app.whenReady().then(async () => {
             contents.executeJavaScript(TWITCH_AD_JS).catch(() => {})
           }
         }
+
+        // Boutons souris 4 (retour) et 5 (avant) — injectés dans chaque page
+        contents.executeJavaScript(`(function(){
+          if (window.__dvMouseNav) return; window.__dvMouseNav = 1;
+          document.addEventListener('mouseup', function(e) {
+            if (e.button === 3) { e.preventDefault(); history.back(); }
+            if (e.button === 4) { e.preventDefault(); history.forward(); }
+          }, true);
+        })()`).catch(() => {})
 
         if (config.webDarkMode && !url.startsWith('divo:')) {
           try {
