@@ -35,7 +35,7 @@
         { "target": "nsis",     "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
       ],
-      "artifactName": "${productName}.${version}.${ext}",
+      "artifactName": "${productName}.Portable.${version}.${ext}",
       "icon": "assets/icon.png",
       "protocols": [
         {

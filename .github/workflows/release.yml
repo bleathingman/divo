@@ -97,7 +97,10 @@ jobs:
           } while ($status.status -in @('InProgress','WaitingForApproval','Queued'))
 
           if ($status.status -ne 'Completed') {
-            Write-Error "Signature échouée : $($status.status)"; exit 1
+            Write-Host "=== Détails SignPath ===" -ForegroundColor Red
+            Write-Host ($status | ConvertTo-Json -Depth 5)
+            Write-Error "Signature échouée : $($status.status)"
+            exit 1
           }
 
           # 4. Télécharger et extraire les .exe signés
