@@ -806,9 +806,9 @@ async function checkForUpdate() {
     const rel = await res.json()
     const latest = (rel.tag_name || '').replace(/^v/, '')
     if (!latest || !semverGt(latest, app.getVersion())) return
-    const asset = process.platform === 'linux'
-      ? rel.assets?.find(a => /\.AppImage$/i.test(a.name))
-      : rel.assets?.find(a => /Setup.*\.exe$/i.test(a.name))
+    const asset = process.platform === 'linux'  ? rel.assets?.find(a => /\.AppImage$/i.test(a.name))
+               : process.platform === 'darwin' ? rel.assets?.find(a => /\.dmg$/i.test(a.name))
+               :                                 rel.assets?.find(a => /Setup.*\.exe$/i.test(a.name))
     // L'URL reste côté main — le renderer ne la reçoit jamais
     pendingUpdateUrl     = asset?.browser_download_url || null
     pendingUpdateVersion = latest
@@ -840,8 +840,11 @@ ipcMain.handle('install-update', async () => {
   } catch { return { ok: false, reason: 'bad-url' } }
 
   const isLinux = process.platform === 'linux'
+  const isMac   = process.platform === 'darwin'
   const rand    = crypto.randomBytes(8).toString('hex')
-  const fileName = isLinux ? `Divo-update-${rand}.AppImage` : `Divo-Setup-update-${rand}.exe`
+  const fileName = isLinux ? `Divo-update-${rand}.AppImage`
+                 : isMac   ? `Divo-update-${rand}.dmg`
+                 :            `Divo-Setup-update-${rand}.exe`
   const tmpPath  = path.join(app.getPath('temp'), fileName)
 
   // Téléchargement avec progression réelle via Node https (plus fiable que net.fetch pour les gros fichiers)
@@ -924,11 +927,24 @@ ipcMain.handle('install-update', async () => {
       ].join('\n') + '\n'
       fs.writeFileSync(scriptPath, script, { flag: 'wx', mode: 0o700 })
       spawn(scriptPath, [tmpPath, currentAppImage], { detached: true, stdio: 'ignore', shell: false }).unref()
+    } else if (isMac) {
+      // macOS : monte le DMG, copie Divo.app dans /Applications, démonte, relance
+      // tmpPath passé en $1 pour éviter toute injection shell
+      const scriptPath = path.join(app.getPath('temp'), `divo-mac-upd-${rand}.sh`)
+      const script = [
+        '#!/bin/sh',
+        'MNTDIR=$(hdiutil attach "$1" -nobrowse -quiet | tail -1 | awk \'{print $NF}\')',
+        '[ -d "$MNTDIR/Divo.app" ] && cp -R "$MNTDIR/Divo.app" /Applications/ 2>/dev/null || true',
+        '[ -n "$MNTDIR" ] && hdiutil detach "$MNTDIR" -quiet 2>/dev/null || true',
+        'rm -f "$1" "$0"',
+        'sleep 1',
+        'open -a Divo',
+      ].join('\n') + '\n'
+      fs.writeFileSync(scriptPath, script, { flag: 'wx', mode: 0o700 })
+      spawn('sh', [scriptPath, tmpPath], { detached: true, stdio: 'ignore', shell: false }).unref()
     } else {
-      // PowerShell : attend 2s que Divo soit complètement libéré par Windows,
-      // installe en silencieux (/S), relance si succès.
-      // Fallback : si NSIS échoue (exe encore verrouillé, droits…), ouvre l'installeur
-      // en mode normal pour que l'utilisateur puisse finir manuellement.
+      // Windows : PowerShell — attend 2s que Divo se ferme, installe en silencieux (/S), relance.
+      // Fallback : ouvre l'installeur avec interface si NSIS échoue.
       // Les chemins passent via $env: → aucune injection possible.
       const ps = [
         'Start-Sleep -Seconds 2',
@@ -959,6 +975,8 @@ function createWindow() {
     width: 1280, height: 800, minWidth: 600, minHeight: 500,
     frame: false, show: false, backgroundColor: '#1c1c1e',
     autoHideMenuBar: true,
+    // macOS — coins arrondis natifs (frame: false supprime les traffic lights, c'est voulu)
+    ...(process.platform === 'darwin' ? { roundedCorners: true, vibrancy: 'under-window' } : {}),
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1287,6 +1305,44 @@ app.whenReady().then(async () => {
   })
 
   createWindow()
+
+  // ── macOS : menu système (indispensable pour Cmd+C/V/Z/A dans les champs texte)
+  if (process.platform === 'darwin') {
+    const { Menu } = require('electron')
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { role: 'about', label: 'À propos de Divo' },
+          { type: 'separator' },
+          { role: 'services', label: 'Services' },
+          { type: 'separator' },
+          { role: 'hide',      label: 'Masquer Divo' },
+          { role: 'hideOthers',label: 'Masquer les autres' },
+          { role: 'unhide',    label: 'Tout afficher' },
+          { type: 'separator' },
+          { role: 'quit', label: 'Quitter Divo' }
+        ]
+      },
+      {
+        label: 'Édition',
+        submenu: [
+          { role: 'undo',      label: 'Annuler' },
+          { role: 'redo',      label: 'Rétablir' },
+          { type: 'separator' },
+          { role: 'cut',       label: 'Couper' },
+          { role: 'copy',      label: 'Copier' },
+          { role: 'paste',     label: 'Coller' },
+          { role: 'selectAll', label: 'Tout sélectionner' }
+        ]
+      }
+    ]))
+    // Recréer la fenêtre si l'utilisateur clique sur l'icône dans le Dock
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  }
+
   setTimeout(checkForUpdate, 10000)
   setInterval(checkForUpdate, UPDATE_INTERVAL)
 
