@@ -8,6 +8,9 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'divo', privileges: { standard: true, supportFetchAPI: true } }
 ])
 
+// ID fixe = Windows conserve l'épingle dans la barre des tâches lors des mises à jour
+if (process.platform === 'win32') app.setAppUserModelId('com.divh.divo')
+
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
@@ -685,8 +688,16 @@ ipcMain.handle('install-update', async () => {
       fs.writeFileSync(scriptPath, script, { flag: 'wx', mode: 0o700 })
       spawn(scriptPath, [tmpPath, currentAppImage], { detached: true, stdio: 'ignore', shell: false }).unref()
     } else {
-      // /S = mode silencieux NSIS — mise à jour sans assistant, sans réinstall complète
-      spawn(tmpPath, ['/S'], { detached: true, stdio: 'ignore' }).unref()
+      // PowerShell : lance l'installeur NSIS en silencieux (/S), attend la fin,
+      // puis relance Divo depuis le même chemin (NSIS met à jour l'exe sur place).
+      // Les chemins passent via $env: → aucun risque d'injection dans la commande.
+      const ps =
+        '$i=Start-Process -FilePath $env:DIVO_INST -ArgumentList \'/S\' -Wait -PassThru;' +
+        'if($i.ExitCode -eq 0){Start-Sleep -Milliseconds 800;Start-Process -FilePath $env:DIVO_EXE}'
+      spawn('powershell.exe', ['-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps], {
+        detached: true, stdio: 'ignore',
+        env: { ...process.env, DIVO_INST: tmpPath, DIVO_EXE: process.execPath }
+      }).unref()
     }
 
     app.quit()
