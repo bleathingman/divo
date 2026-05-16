@@ -59,32 +59,25 @@ jobs:
           Install-Module -Name SignPath -Force -Scope CurrentUser -ErrorAction Stop
           Import-Module SignPath
 
-          $zip    = 'dist\to-sign.zip'
-          $signed = 'dist\signed.zip'
+          $params = @{
+            ApiToken                  = $env:SIGNPATH_API_TOKEN
+            OrganizationId            = '549bac04-15c1-411d-be59-a665db738d4f'
+            ProjectSlug               = 'divo'
+            SigningPolicySlug         = 'test-signing'
+            ArtifactConfigurationSlug = 'initial'
+            WaitForCompletion         = $true
+          }
 
-          # ZIP des .exe et log du contenu pour debug
-          Compress-Archive -Path dist\*.exe -DestinationPath $zip -Force
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          Write-Host "Fichiers dans le ZIP :"
-          [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path).Entries |
-            Select-Object Name, Length | Format-Table
-
-          # Soumettre et attendre (le module gère WaitingForApproval automatiquement)
-          Submit-SigningRequest `
-            -InputArtifactPath         $zip `
-            -OutputArtifactPath        $signed `
-            -ApiToken                  $env:SIGNPATH_API_TOKEN `
-            -OrganizationId            '549bac04-15c1-411d-be59-a665db738d4f' `
-            -ProjectSlug               'divo' `
-            -SigningPolicySlug         'test-signing' `
-            -ArtifactConfigurationSlug 'initial' `
-            -WaitForCompletion
-
-          # Extraire les .exe signés et remplacer dans dist/
-          Expand-Archive $signed -DestinationPath 'dist\signed' -Force
-          Copy-Item 'dist\signed\*.exe' 'dist\' -Force
-          Remove-Item $zip, $signed, 'dist\signed' -Recurse -Force
-          Write-Host "Signature terminée avec succès"
+          # Signer chaque .exe directement (pas de ZIP — artifact config <pe-file>)
+          foreach ($exe in Get-ChildItem dist\*.exe) {
+            $out = "dist\signed-$($exe.Name)"
+            Write-Host "Signature : $($exe.Name)"
+            Submit-SigningRequest @params `
+              -InputArtifactPath  $exe.FullName `
+              -OutputArtifactPath $out
+            Move-Item $out $exe.FullName -Force
+            Write-Host "OK : $($exe.Name)"
+          }
 
       - name: SHA256SUMS + upload Windows
         run: |
