@@ -209,6 +209,190 @@ function getProtectedSessions() {
   return [session.defaultSession, ...PROTECTED_PARTITIONS.map(p => session.fromPartition(p))]
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ── Extensions utilisateur (Chrome Web Store)
+// ═══════════════════════════════════════════════════════════════
+const USER_EXT_DIR = path.join(app.getPath('userData'), 'user-extensions')
+fs.mkdirSync(USER_EXT_DIR, { recursive: true })
+
+// Lit le manifest.json d'un répertoire d'extension
+function readExtManifest(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf-8')) } catch { return null }
+}
+
+// Enlève le header CRX pour obtenir le ZIP brut
+function crxToZip(buffer) {
+  if (buffer.toString('ascii', 0, 4) !== 'Cr24') {
+    // Déjà un ZIP ?
+    if (buffer[0] === 0x50 && buffer[1] === 0x4B) return buffer
+    throw new Error('Format CRX invalide')
+  }
+  const ver = buffer.readUInt32LE(4)
+  if (ver === 2) {
+    const pubLen = buffer.readUInt32LE(8), sigLen = buffer.readUInt32LE(12)
+    return buffer.subarray(16 + pubLen + sigLen)
+  }
+  if (ver === 3) {
+    const hdrLen = buffer.readUInt32LE(8)
+    return buffer.subarray(12 + hdrLen)
+  }
+  throw new Error('Version CRX non supportée : ' + ver)
+}
+
+// Extrait un ZIP dans destDir (PowerShell sur Windows, unzip sur Linux)
+function extractZip(zipPath, destDir) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(destDir, { recursive: true })
+    let proc
+    if (process.platform === 'win32') {
+      const cmd = `Expand-Archive -Force -Path '${zipPath.replace(/'/g,"''")}' -DestinationPath '${destDir.replace(/'/g,"''")}'`
+      proc = spawn('powershell.exe', ['-NonInteractive', '-Command', cmd], { stdio: 'ignore' })
+    } else {
+      proc = spawn('unzip', ['-o', '-q', zipPath, '-d', destDir], { stdio: 'ignore' })
+    }
+    proc.on('close', c => c === 0 ? resolve() : reject(new Error('Extraction ZIP échouée: ' + c)))
+    proc.on('error', reject)
+  })
+}
+
+// Télécharge et installe un CRX depuis son ID Chrome Web Store
+async function installExtensionById(extId) {
+  const url = `https://clients2.google.com/service/update2/crx?` +
+    `response=redirect&prodversion=130.0.0.0&acceptformat=crx3,crx2` +
+    `&x=id%3D${extId}%26uc`
+  const crxPath  = path.join(app.getPath('temp'), `ext-${extId}.crx`)
+  const zipPath  = path.join(app.getPath('temp'), `ext-${extId}.zip`)
+  const destDir  = path.join(USER_EXT_DIR, extId)
+
+  const res = await net.fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  const buffer = Buffer.from(await res.arrayBuffer())
+  if (buffer.length < 1024) throw new Error('CRX trop petit')
+
+  fs.writeFileSync(crxPath, crxToZip(buffer))
+  fs.renameSync(crxPath, zipPath)
+  await extractZip(zipPath, destDir)
+  try { fs.unlinkSync(zipPath) } catch {}
+
+  const manifest = readExtManifest(destDir)
+  if (!manifest) throw new Error('manifest.json introuvable après extraction')
+
+  // Charger pour toutes les sessions
+  for (const s of getProtectedSessions()) {
+    try { await s.loadExtension(destDir, { allowFileAccess: false }) } catch {}
+  }
+
+  // Enregistrer dans config
+  if (!config.userExtensions) config.userExtensions = []
+  config.userExtensions = config.userExtensions.filter(e => e.id !== extId)
+  config.userExtensions.push({ id: extId, enabled: true })
+  saveConfig()
+  mainWindow?.webContents.send('extension-installed', { id: extId, name: manifest.name || extId })
+  return { id: extId, name: manifest.name, version: manifest.version }
+}
+
+// Charge toutes les extensions utilisateur au démarrage
+async function loadUserExtensions() {
+  if (!fs.existsSync(USER_EXT_DIR)) return
+  const exts = config.userExtensions || []
+  for (const ext of exts) {
+    if (!ext.enabled) continue
+    const dir = path.join(USER_EXT_DIR, ext.id)
+    if (!fs.existsSync(path.join(dir, 'manifest.json'))) continue
+    for (const s of getProtectedSessions()) {
+      try { await s.loadExtension(dir, { allowFileAccess: false }) } catch {}
+    }
+  }
+}
+
+// ── IPC extensions
+ipcMain.handle('get-user-extensions', () => {
+  return (config.userExtensions || []).map(e => {
+    const dir = path.join(USER_EXT_DIR, e.id)
+    const manifest = readExtManifest(dir) || {}
+    const icons = manifest.icons || {}
+    const iconFile = icons['48'] || icons['128'] || icons['32'] || icons['16'] || null
+    return {
+      id:          e.id,
+      enabled:     e.enabled,
+      name:        manifest.name        || e.id,
+      version:     manifest.version     || '?',
+      description: manifest.description || '',
+      iconPath:    iconFile || null,
+    }
+  })
+})
+
+ipcMain.handle('install-extension-by-id', async (_, extId) => {
+  if (!/^[a-z]{32}$/.test(extId)) return { ok: false, reason: 'ID invalide' }
+  try {
+    const info = await installExtensionById(extId)
+    return { ok: true, ...info }
+  } catch (e) {
+    console.error('[ext] install error', e)
+    return { ok: false, reason: e.message }
+  }
+})
+
+ipcMain.handle('remove-user-extension', async (_, extId) => {
+  // Retirer des sessions chargées
+  for (const s of getProtectedSessions()) {
+    try {
+      const loaded = s.getAllExtensions()
+      const ext = loaded.find(e => e.id === extId)
+      if (ext) s.removeExtension(extId)
+    } catch {}
+  }
+  // Supprimer le répertoire
+  try { fs.rmSync(path.join(USER_EXT_DIR, extId), { recursive: true, force: true }) } catch {}
+  // Retirer de la config
+  config.userExtensions = (config.userExtensions || []).filter(e => e.id !== extId)
+  saveConfig()
+  return { ok: true }
+})
+
+ipcMain.handle('toggle-user-extension', async (_, extId, enabled) => {
+  const ext = (config.userExtensions || []).find(e => e.id === extId)
+  if (!ext) return { ok: false }
+  ext.enabled = enabled
+  saveConfig()
+  const dir = path.join(USER_EXT_DIR, extId)
+  for (const s of getProtectedSessions()) {
+    try {
+      if (enabled) {
+        await s.loadExtension(dir, { allowFileAccess: false })
+      } else {
+        s.removeExtension(extId)
+      }
+    } catch {}
+  }
+  return { ok: true }
+})
+
+// Script injecté sur la Chrome Web Store pour remplacer "Add to Chrome" → "Add to Divo"
+const CWS_INJECT_JS = `(function(){
+  if (window.__dvCws) return; window.__dvCws = 1;
+  const m = location.pathname.match(/\\/detail\\/[^/]+\\/([a-z]{32})/);
+  if (!m) return;
+  const extId = m[1];
+  function patch() {
+    document.querySelectorAll('button').forEach(btn => {
+      if (btn.__dvP) return;
+      const t = btn.textContent.trim();
+      if (/add to chrome/i.test(t) || /ajouter/i.test(t)) {
+        btn.__dvP = true;
+        btn.addEventListener('click', e => {
+          e.preventDefault(); e.stopPropagation();
+          document.title = 'divo-action:install-extension:' + extId;
+        }, true);
+        btn.textContent = btn.textContent.replace(/add to chrome/gi,'Add to Divo').replace(/ajouter/gi,'Ajouter à Divo');
+      }
+    });
+  }
+  patch();
+  new MutationObserver(patch).observe(document.body, { childList: true, subtree: true });
+})()`
+
 // ── Handlers nommés (appliqués sur chaque session)
 const CSP_INTERNAL =
   "default-src 'none'; " +
@@ -830,7 +1014,9 @@ app.whenReady().then(async () => {
   setupCsp()
 
   // ── Protocole divo://
-  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html' }
+  await loadUserExtensions()
+
+  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html', extensions: 'extensions.html' }
   const DIVO_MIME  = { '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
                        '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
                        '.woff': 'font/woff', '.woff2': 'font/woff2' }
@@ -853,14 +1039,27 @@ app.whenReady().then(async () => {
       return new Response(fs.readFileSync(filePath), { headers: { 'Content-Type': mime } })
     }
 
+    // Icônes d'extensions : divo://ext-icon/{extId}/{...chemin}
+    if (hostname === 'ext-icon') {
+      const iconRel  = pathname.replace(/^\/+/, '')
+      const parts    = iconRel.split('/')
+      const extId    = parts.shift()
+      const iconPath = parts.join('/')
+      if (/^[a-z]{32}$/.test(extId) && iconPath) {
+        const iconFile = path.join(USER_EXT_DIR, extId, iconPath)
+        if (fs.existsSync(iconFile)) {
+          const mime = DIVO_MIME[path.extname(iconPath).toLowerCase()] || 'image/png'
+          return new Response(fs.readFileSync(iconFile), { headers: { 'Content-Type': mime } })
+        }
+      }
+      return new Response('Not found', { status: 404 })
+    }
+
     // Page principale
     const file = DIVO_PAGES[hostname]
     if (file) {
       const theme  = config.theme || 'dark'
       const dlPath = (config.downloadPath || app.getPath('downloads')).replace(/"/g, '&quot;')
-      // Injection sans script inline (CSP script-src 'self') :
-      // • data-theme directement sur <html> → pas de FOUC
-      // • <meta name="divo-dl-path"> → lu par settings.js
       const html = fs.readFileSync(path.join(RENDERER_DIR, file), 'utf-8')
         .replace('<html lang="fr">', `<html lang="fr" data-theme="${theme}">`)
         .replace('</head>', `<meta name="divo-dl-path" content="${dlPath}">\n</head>`)
@@ -994,6 +1193,11 @@ app.whenReady().then(async () => {
             if (e.button === 4) { e.preventDefault(); history.forward(); }
           }, true);
         })()`).catch(() => {})
+
+        // Injection Chrome Web Store → remplace "Add to Chrome" par "Add to Divo"
+        if (url.includes('chromewebstore.google.com/detail/')) {
+          contents.executeJavaScript(CWS_INJECT_JS).catch(() => {})
+        }
 
         if (config.webDarkMode && !url.startsWith('divo:')) {
           try {

@@ -35,4 +35,9 @@ contextBridge.exposeInMainWorld('bridge', {
   isDefaultBrowser:     ()    => ipcRenderer.invoke('is-default-browser'),
   setDefaultBrowser:    ()    => ipcRenderer.invoke('set-default-browser'),
   onNotDefaultBrowser:  (cb)  => ipcRenderer.on('not-default-browser', () => cb()),
+  getUserExtensions:    ()    => ipcRenderer.invoke('get-user-extensions'),
+  installExtById:       (id)  => ipcRenderer.invoke('install-extension-by-id', id),
+  removeUserExtension:  (id)  => ipcRenderer.invoke('remove-user-extension', id),
+  toggleUserExtension:  (id, enabled) => ipcRenderer.invoke('toggle-user-extension', id, enabled),
+  onExtensionInstalled: (cb)  => ipcRenderer.on('extension-installed', (_, d) => cb(d)),
 })

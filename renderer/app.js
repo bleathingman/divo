@@ -216,7 +216,7 @@ function stripSlash(u) { return (u || '').replace(/\/+$/, '') }
 // Comparaison stricte sur le protocole divo: — les includes() sur .html étaient bypassables
 // par n'importe quelle page externe hébergée à une URL contenant "newtab.html" etc.
 function isSpecial(url) {
-  try { const u = new URL(url); return u.protocol === 'divo:' && ['newtab','settings','dino'].includes(u.hostname) }
+  try { const u = new URL(url); return u.protocol === 'divo:' && ['newtab','settings','dino','extensions'].includes(u.hostname) }
   catch { return !url }
 }
 function isNewtab(url)   { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'newtab'   } catch { return !url } }
@@ -587,6 +587,18 @@ function wireWebviewEvents(el) {
     }
     // Action réservée exclusivement à la page settings (garde plus strict que isSpecial)
     // La vraie protection contre l'abus est le dialog.showMessageBox côté main
+    // Installation d'extension depuis la Chrome Web Store
+    if (e.title.startsWith('divo-action:install-extension:')) {
+      const extId = e.title.split(':')[2]
+      if (/^[a-z]{32}$/.test(extId)) {
+        window.bridge.installExtById(extId).then(res => {
+          if (res.ok) {
+            createTab('divo://extensions')
+          }
+        })
+      }
+      return
+    }
     if (e.title === 'divo-settings-action:set-default-browser') {
       if (isSettings(currentUrl)) window.bridge.setDefaultBrowser()
       return
