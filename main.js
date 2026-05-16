@@ -793,7 +793,9 @@ const WEB_DARK_SKIP = [
 // ── Auto-update
 const REPO = 'bleathingman/divo'
 const UPDATE_INTERVAL = 4 * 60 * 60 * 1000
-const ALLOWED_UPDATE_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'])
+function isAllowedUpdateHost(h) {
+  return h === 'github.com' || h === 'api.github.com' || h.endsWith('.githubusercontent.com')
+}
 let pendingUpdateUrl     = null
 let pendingUpdateVersion = null
 
@@ -843,7 +845,7 @@ ipcMain.handle('install-update', async () => {
   try {
     const u = new URL(url)
     if (u.protocol !== 'https:') return { ok: false, reason: 'bad-proto' }
-    if (!ALLOWED_UPDATE_HOSTS.has(u.hostname)) return { ok: false, reason: 'bad-host' }
+    if (!isAllowedUpdateHost(u.hostname)) return { ok: false, reason: 'bad-host' }
     if (u.hostname === 'github.com' && !u.pathname.startsWith(`/${REPO}/releases/download/`)) {
       return { ok: false, reason: 'bad-path' }
     }
@@ -866,7 +868,7 @@ ipcMain.handle('install-update', async () => {
         try {
           const parsed = new URL(u)
           if (parsed.protocol !== 'https:') { reject(new Error('Protocole invalide')); return }
-          if (!ALLOWED_UPDATE_HOSTS.has(parsed.hostname)) { reject(new Error('Hôte non autorisé : ' + parsed.hostname)); return }
+          if (!isAllowedUpdateHost(parsed.hostname)) { reject(new Error('Hôte non autorisé : ' + parsed.hostname)); return }
         } catch (e) { reject(e); return }
 
         https.get(u, { headers: { 'User-Agent': `Divo-Browser/${app.getVersion()}` } }, res => {
