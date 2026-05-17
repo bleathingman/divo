@@ -569,6 +569,11 @@ function cspHandler(details, callback) {
 }
 
 function adblockHandler(details, callback) {
+  // Ne jamais bloquer ni upgrader les requêtes d'extensions
+  if (details.url.startsWith('chrome-extension://') ||
+      (details.initiator && details.initiator.startsWith('chrome-extension://'))) {
+    callback({}); return
+  }
   // HTTPS upgrade — mainFrame uniquement, ignore les adresses locales
   if (config.httpsUpgrade !== false && details.url.startsWith('http://') && details.resourceType === 'mainFrame') {
     try {
@@ -1459,7 +1464,7 @@ app.whenReady().then(async () => {
           if (!contents.isDestroyed()) contents.executeJavaScript(CWS_INJECT_JS).catch(() => {})
         }
 
-        if (config.webDarkMode && !url.startsWith('divo:')) {
+        if (config.webDarkMode && !url.startsWith('divo:') && !url.startsWith('chrome-extension:')) {
           try {
             const hostname = new URL(url).hostname.replace(/^www\./, '')
             const skip = WEB_DARK_SKIP.some(h => hostname === h || hostname.endsWith('.' + h))
@@ -1474,7 +1479,7 @@ app.whenReady().then(async () => {
         if (url.includes('chromewebstore.google.com/detail/')) {
           if (!contents.isDestroyed()) contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
         }
-        if (!config.webDarkMode) return
+        if (!config.webDarkMode || url.startsWith('chrome-extension:')) return
         try {
           const hostname = new URL(url).hostname.replace(/^www\./, '')
           const skip = WEB_DARK_SKIP.some(h => hostname === h || hostname.endsWith('.' + h))
