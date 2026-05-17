@@ -216,9 +216,33 @@ function getProtectedSessions() {
 const USER_EXT_DIR = path.join(app.getPath('userData'), 'user-extensions')
 fs.mkdirSync(USER_EXT_DIR, { recursive: true })
 
-// Lit le manifest.json d'un répertoire d'extension
+// Trouve le bon répertoire d'une extension (root ou sous-dossier versionné type "1.2.3_0")
+function findExtDir(baseDir) {
+  if (fs.existsSync(path.join(baseDir, 'manifest.json'))) return baseDir
+  try {
+    const sub = fs.readdirSync(baseDir).find(d => /^\d/.test(d) && fs.existsSync(path.join(baseDir, d, 'manifest.json')))
+    if (sub) return path.join(baseDir, sub)
+  } catch {}
+  return baseDir
+}
+
+// Lit le manifest.json d'un répertoire d'extension (supporte les sous-dossiers versionnés)
 function readExtManifest(dir) {
-  try { return JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf-8')) } catch { return null }
+  const actualDir = findExtDir(dir)
+  try { return JSON.parse(fs.readFileSync(path.join(actualDir, 'manifest.json'), 'utf-8')) } catch { return null }
+}
+
+// Résout les noms localisés __MSG_xxx__ depuis _locales/
+function resolveMsg(value, extDir) {
+  if (!value || !value.startsWith('__MSG_')) return value
+  const key = value.replace(/^__MSG_/, '').replace(/__$/, '')
+  try {
+    const manifest = readExtManifest(extDir)
+    const locale = manifest?.default_locale || 'en'
+    const actualDir = findExtDir(extDir)
+    const msgs = JSON.parse(fs.readFileSync(path.join(actualDir, '_locales', locale, 'messages.json'), 'utf-8'))
+    return msgs[key]?.message || msgs[key.toLowerCase()]?.message || value
+  } catch { return value }
 }
 
 // ── Setup Chrome Web Store (electron-chrome-web-store)
@@ -450,7 +474,8 @@ async function loadUserExtensions() {
   const exts = config.userExtensions || []
   for (const ext of exts) {
     if (!ext.enabled) continue
-    const dir = path.join(USER_EXT_DIR, ext.id)
+    const baseDir = path.join(USER_EXT_DIR, ext.id)
+    const dir = findExtDir(baseDir)
     if (!fs.existsSync(path.join(dir, 'manifest.json'))) continue
     for (const s of getProtectedSessions()) {
       try { await s.extensions.loadExtension(dir, { allowFileAccess: false }) } catch {}
@@ -461,16 +486,18 @@ async function loadUserExtensions() {
 // ── IPC extensions
 ipcMain.handle('get-user-extensions', () => {
   return (config.userExtensions || []).map(e => {
-    const dir = path.join(USER_EXT_DIR, e.id)
-    const manifest = readExtManifest(dir) || {}
+    const baseDir = path.join(USER_EXT_DIR, e.id)
+    const manifest = readExtManifest(baseDir) || {}
     const icons = manifest.icons || {}
-    const iconFile = icons['48'] || icons['128'] || icons['32'] || icons['16'] || null
+    const iconFile = icons['48'] || icons['128'] || icons['64'] || icons['32'] || icons['16'] || null
+    const rawName = manifest.name || e.id
+    const rawDesc = manifest.description || ''
     return {
       id:          e.id,
       enabled:     e.enabled,
-      name:        manifest.name        || e.id,
-      version:     manifest.version     || '?',
-      description: manifest.description || '',
+      name:        resolveMsg(rawName, baseDir) || e.id,
+      version:     manifest.version || '?',
+      description: resolveMsg(rawDesc, baseDir),
       iconPath:    iconFile || null,
     }
   })
@@ -1250,7 +1277,8 @@ app.whenReady().then(async () => {
       const extId    = parts.shift()
       const iconPath = parts.join('/')
       if (/^[a-z]{32}$/.test(extId) && iconPath) {
-        const iconFile = path.join(USER_EXT_DIR, extId, iconPath)
+        const extDir = findExtDir(path.join(USER_EXT_DIR, extId))
+        const iconFile = path.join(extDir, iconPath)
         if (fs.existsSync(iconFile)) {
           const mime = DIVO_MIME[path.extname(iconPath).toLowerCase()] || 'image/png'
           return new Response(fs.readFileSync(iconFile), { headers: { 'Content-Type': mime } })
