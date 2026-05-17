@@ -3,6 +3,7 @@ const path = require('path')
 const fs   = require('fs')
 const { spawn } = require('child_process')
 const crypto = require('crypto')
+const { installChromeWebStore, installExtension, uninstallExtension } = require('electron-chrome-web-store')
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'divo', privileges: { standard: true, supportFetchAPI: true } }
@@ -220,7 +221,60 @@ function readExtManifest(dir) {
   try { return JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf-8')) } catch { return null }
 }
 
-// Enlève le header CRX pour obtenir le ZIP brut
+// ── Setup Chrome Web Store (electron-chrome-web-store)
+// Note: le preload de la lib ne fonctionne pas dans les webview Electron (guest process).
+// On utilise la lib uniquement pour le téléchargement/installation CRX (MV3 natif).
+async function setupChromeWebStore() {
+  // Polyfill injecté dans tous les service workers d'extensions (chrome.storage.sync, session, scripting)
+  const swPolyfillPath = path.join(__dirname, 'ext-sw-polyfill.js')
+  for (const s of getProtectedSessions()) {
+    try { s.registerPreloadScript({ id: `divo-sw-${s.partition||'d'}`,    type: 'service-worker', filePath: swPolyfillPath }) } catch (e) { console.warn('[ext] registerPreloadScript SW:', e.message) }
+    try { s.registerPreloadScript({ id: `divo-fr-${s.partition||'d'}`,    type: 'frame',          filePath: swPolyfillPath }) } catch (e) { console.warn('[ext] registerPreloadScript frame:', e.message) }
+  }
+
+  try {
+    await installChromeWebStore({
+      session: session.fromPartition('persist:divo'),
+      extensionsPath: USER_EXT_DIR,
+      loadExtensions: false,
+      autoUpdate: false,
+      beforeInstall: async () => ({ action: 'allow' }),
+    })
+  } catch (e) { console.warn('[cws] installChromeWebStore:', e.message) }
+}
+
+// Injection CWS dans les webviews — déclenche l'install via page-title-updated
+const CWS_INJECT_JS = `(function(){
+  if (window.__dvCws) return; window.__dvCws = 1;
+  function getExtId() {
+    const m = location.pathname.match(/\\/detail\\/[^/]+\\/([a-z]{32})/);
+    return m ? m[1] : null;
+  }
+  function injectBtn() {
+    const extId = getExtId(); if (!extId) return;
+    if (document.getElementById('__divo_add')) return;
+    const addBtn = Array.from(document.querySelectorAll('button,[role="button"]')).find(el =>
+      /add to chrome|ajouter|hinzufügen|añadir|aggiungi/i.test((el.textContent + ' ' + (el.getAttribute('aria-label')||'')).trim())
+    );
+    const btn = document.createElement('button');
+    btn.id = '__divo_add';
+    btn.textContent = 'Add to Divo';
+    btn.style.cssText = 'background:#0a84ff;color:#fff;border:none;border-radius:20px;padding:8px 22px;font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;margin:4px 0 4px 8px;';
+    btn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); document.title='divo-action:install-extension:'+extId; }, true);
+    if (addBtn) {
+      addBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); document.title='divo-action:install-extension:'+extId; }, true);
+      addBtn.textContent = addBtn.textContent.replace(/add to chrome/gi,'Add to Divo').replace(/ajouter à chrome/gi,'Ajouter à Divo').replace(/ajouter/gi,'Ajouter à Divo');
+      addBtn.parentNode?.insertBefore(btn, addBtn.nextSibling);
+    } else {
+      btn.style.cssText += 'position:fixed;top:64px;right:16px;z-index:2147483647;box-shadow:0 2px 12px rgba(0,0,0,.35);';
+      document.body.appendChild(btn);
+    }
+  }
+  injectBtn();
+  new MutationObserver(injectBtn).observe(document.body, { childList:true, subtree:true });
+})()`
+
+// LEGACY — kept for reference
 function crxToZip(buffer) {
   if (buffer.toString('ascii', 0, 4) !== 'Cr24') {
     // Déjà un ZIP ?
@@ -278,57 +332,128 @@ function downloadCrx(startUrl) {
   })
 }
 
-// Télécharge et installe un CRX depuis son ID Chrome Web Store
+// Shim injecté en inline dans la background page HTML (avant le SW script)
+const MV3_SHIM_JS = `
+/* Divo MV3→MV2 shim */
+(function(){
+  if(typeof chrome==='undefined') return;
+
+  // chrome.action ↔ chrome.browserAction
+  if(chrome.action && !chrome.browserAction) chrome.browserAction=chrome.action;
+  if(chrome.browserAction && !chrome.action)  chrome.action=chrome.browserAction;
+
+  // chrome.scripting polyfill
+  if(!chrome.scripting) chrome.scripting={
+    executeScript:function({target,func,files,args}){
+      const id=target&&target.tabId;
+      if(func){const code='('+func.toString()+')('+(args||[]).map(JSON.stringify).join(',')+')';return new Promise((rs,rj)=>chrome.tabs.executeScript(id,{code},r=>chrome.runtime.lastError?rj(chrome.runtime.lastError):rs([{result:r&&r[0]}])));}
+      if(files)return Promise.all(files.map(f=>new Promise((rs)=>chrome.tabs.executeScript(id,{file:f},()=>rs()))));
+      return Promise.resolve([]);
+    },
+    insertCSS:function({target,css,files}){
+      const id=target&&target.tabId;
+      if(css)return new Promise(rs=>chrome.tabs.insertCSS(id,{code:css},()=>rs()));
+      if(files)return Promise.all(files.map(f=>new Promise(rs=>chrome.tabs.insertCSS(id,{file:f},()=>rs()))));
+      return Promise.resolve();
+    },
+    removeCSS:function(){return Promise.resolve();}
+  };
+
+  // chrome.storage.session (volatile in-memory)
+  if(chrome.storage && !chrome.storage.session){
+    const m=Object.create(null),ls=[];
+    chrome.storage.session={
+      get:function(k,cb){let r;if(!k)r=Object.assign({},m);else if(typeof k==='string')r={[k]:m[k]};else if(Array.isArray(k))r=k.reduce((o,x)=>(o[x]=m[x],o),{});else r=Object.keys(k).reduce((o,x)=>(o[x]=m[x]!==undefined?m[x]:k[x],o),{});if(cb)cb(r);return Promise.resolve(r);},
+      set:function(v,cb){const ch={};Object.keys(v).forEach(x=>{ch[x]={oldValue:m[x],newValue:v[x]};m[x]=v[x]});ls.forEach(f=>f(ch,'session'));if(cb)cb();return Promise.resolve();},
+      remove:function(k,cb){(Array.isArray(k)?k:[k]).forEach(x=>delete m[x]);if(cb)cb();return Promise.resolve();},
+      clear:function(cb){Object.keys(m).forEach(x=>delete m[x]);if(cb)cb();return Promise.resolve();},
+      onChanged:{addListener:f=>ls.push(f),removeListener:f=>{const i=ls.indexOf(f);if(i>-1)ls.splice(i,1)},hasListener:f=>ls.includes(f)}
+    };
+  }
+
+  // chrome.storage.sync → chrome.storage.local si absent
+  if(chrome.storage && !chrome.storage.sync) chrome.storage.sync=chrome.storage.local;
+
+  // Service worker globals
+  if(typeof clients==='undefined') window.clients={matchAll:()=>Promise.resolve([]),claim:()=>Promise.resolve(),openWindow:url=>{try{window.open(url)}catch(e){}return Promise.resolve(null)}};
+  if(typeof skipWaiting==='undefined') window.skipWaiting=()=>Promise.resolve();
+  if(typeof caches==='undefined') window.caches={open:()=>Promise.resolve({put:()=>Promise.resolve(),match:()=>Promise.resolve(undefined),delete:()=>Promise.resolve(false),keys:()=>Promise.resolve([])}),match:()=>Promise.resolve(undefined),has:()=>Promise.resolve(false),delete:()=>Promise.resolve(false),keys:()=>Promise.resolve([])};
+
+  // Masquer les events cycle-de-vie SW (install/activate/fetch) — sans sens dans une page
+  const _ael=EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener=function(t,...a){if(this===window&&(t==='install'||t==='activate'||t==='fetch'))return;return _ael.call(this,t,...a);};
+})();
+`
+
+// Convertit un manifest MV3 en MV2 compatible Electron via background page HTML
+function patchMv3ToMv2(dir, manifest) {
+  const swFile = manifest.background.service_worker
+
+  // Détecter si le SW utilise des ES modules (import/export au niveau top-level)
+  let useModule = false
+  try {
+    const swSrc = fs.readFileSync(path.join(dir, swFile), 'utf-8')
+    useModule = /^\s*(import\s|export\s)/m.test(swSrc)
+  } catch {}
+
+  // Background page HTML — charge le shim puis le SW (module ou script classique)
+  const scriptTag = useModule
+    ? `<script type="module">\n${MV3_SHIM_JS}\nimport './${swFile}';\n</script>`
+    : `<script>${MV3_SHIM_JS}</script>\n  <script src="${swFile}"></script>`
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>\n  ${scriptTag}\n</body></html>`
+  fs.writeFileSync(path.join(dir, '__divo_bg.html'), html)
+
+  // Patch manifest.json : MV3 → MV2
+  const patched = Object.assign({}, manifest)
+  patched.manifest_version = 2
+  patched.background = { page: '__divo_bg.html', persistent: true }
+
+  // host_permissions → permissions
+  if (manifest.host_permissions?.length)
+    patched.permissions = [...new Set([...(manifest.permissions || []), ...manifest.host_permissions])]
+  delete patched.host_permissions
+
+  // chrome.action → browser_action
+  if (manifest.action && !manifest.browser_action) {
+    patched.browser_action = manifest.action
+    delete patched.action
+  }
+
+  // content_security_policy : objet MV3 → string MV2
+  if (manifest.content_security_policy && typeof manifest.content_security_policy === 'object')
+    patched.content_security_policy = manifest.content_security_policy.extension_pages || "script-src 'self'; object-src 'self'"
+
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(patched, null, 2))
+}
+
+// Installe une extension via electron-chrome-web-store
 async function installExtensionById(extId) {
-  const url = `https://clients2.google.com/service/update2/crx?` +
-    `response=redirect&os=win&arch=x64&nacl_arch=x86-64&prod=chromiumcrx` +
-    `&prodchannel=stable&prodversion=136.0.0.0&acceptformat=crx3,crx2` +
-    `&x=id%3D${extId}%26uc`
-  const crxPath  = path.join(app.getPath('temp'), `ext-${extId}.crx`)
-  const zipPath  = path.join(app.getPath('temp'), `ext-${extId}.zip`)
-  const destDir  = path.join(USER_EXT_DIR, extId)
-
-  const buffer = await downloadCrx(url)
-  if (buffer.length < 1024) throw new Error('CRX trop petit')
-
-  fs.writeFileSync(crxPath, crxToZip(buffer))
-  fs.renameSync(crxPath, zipPath)
-  await extractZip(zipPath, destDir)
-  try { fs.unlinkSync(zipPath) } catch {}
-
-  const manifest = readExtManifest(destDir)
-  if (!manifest) throw new Error('manifest.json introuvable après extraction')
-
-  // MV3 service worker — non supporté par Electron
-  if (manifest.manifest_version >= 3 && manifest.background?.service_worker) {
-    try { fs.rmSync(destDir, { recursive: true, force: true }) } catch {}
-    throw new Error('mv3-unsupported')
-  }
-
-  // Charger pour toutes les sessions
+  const ext = await installExtension(extId, {
+    session: session.fromPartition('persist:divo'),
+    extensionsPath: USER_EXT_DIR,
+  })
+  const dir = path.join(USER_EXT_DIR, extId)
   for (const s of getProtectedSessions()) {
-    try { await s.loadExtension(destDir, { allowFileAccess: false }) } catch {}
+    try { await s.extensions.loadExtension(dir, { allowFileAccess: false }) } catch {}
   }
-
-  // Enregistrer dans config
   if (!config.userExtensions) config.userExtensions = []
   config.userExtensions = config.userExtensions.filter(e => e.id !== extId)
   config.userExtensions.push({ id: extId, enabled: true })
   saveConfig()
-  mainWindow?.webContents.send('extension-installed', { id: extId, name: manifest.name || extId })
-  return { id: extId, name: manifest.name, version: manifest.version }
+  mainWindow?.webContents.send('extension-installed', { id: extId, name: ext.name })
+  return { id: extId, name: ext.name, version: ext.manifest?.version }
 }
 
-// Charge toutes les extensions utilisateur au démarrage
+// Charge toutes les extensions activées au démarrage
 async function loadUserExtensions() {
-  if (!fs.existsSync(USER_EXT_DIR)) return
   const exts = config.userExtensions || []
   for (const ext of exts) {
     if (!ext.enabled) continue
     const dir = path.join(USER_EXT_DIR, ext.id)
     if (!fs.existsSync(path.join(dir, 'manifest.json'))) continue
     for (const s of getProtectedSessions()) {
-      try { await s.loadExtension(dir, { allowFileAccess: false }) } catch {}
+      try { await s.extensions.loadExtension(dir, { allowFileAccess: false }) } catch {}
     }
   }
 }
@@ -366,9 +491,9 @@ ipcMain.handle('remove-user-extension', async (_, extId) => {
   // Retirer des sessions chargées
   for (const s of getProtectedSessions()) {
     try {
-      const loaded = s.getAllExtensions()
+      const loaded = s.extensions.getAllExtensions()
       const ext = loaded.find(e => e.id === extId)
-      if (ext) s.removeExtension(extId)
+      if (ext) s.extensions.removeExtension(extId)
     } catch {}
   }
   // Supprimer le répertoire
@@ -388,64 +513,16 @@ ipcMain.handle('toggle-user-extension', async (_, extId, enabled) => {
   for (const s of getProtectedSessions()) {
     try {
       if (enabled) {
-        await s.loadExtension(dir, { allowFileAccess: false })
+        await s.extensions.loadExtension(dir, { allowFileAccess: false })
       } else {
-        s.removeExtension(extId)
+        s.extensions.removeExtension(extId)
       }
     } catch {}
   }
   return { ok: true }
 })
 
-// Script injecté sur la Chrome Web Store pour remplacer "Add to Chrome" → "Add to Divo"
-const CWS_INJECT_JS = `(function(){
-  if (window.__dvCws) return; window.__dvCws = 1;
-
-  function getExtId() {
-    const m = location.pathname.match(/\\/detail\\/[^/]+\\/([a-z]{32})/);
-    return m ? m[1] : null;
-  }
-
-  function triggerInstall(extId) {
-    document.title = 'divo-action:install-extension:' + extId;
-  }
-
-  function injectBtn() {
-    const extId = getExtId();
-    if (!extId) return;
-    if (document.getElementById('__divo_add')) return;
-
-    // Cherche le bouton "Add to Chrome" / "Ajouter à Chrome" (toutes langues)
-    const addBtn = Array.from(document.querySelectorAll('button,[role="button"]')).find(el => {
-      const t = (el.textContent + ' ' + (el.getAttribute('aria-label') || '')).trim();
-      return /add to chrome|ajouter|hinzufügen|añadir|aggiungi/i.test(t);
-    });
-
-    // Injecte notre bouton "Add to Divo"
-    const btn = document.createElement('button');
-    btn.id = '__divo_add';
-    btn.textContent = 'Add to Divo';
-    btn.style.cssText = 'background:#0a84ff;color:#fff;border:none;border-radius:20px;padding:8px 22px;font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;margin:4px 0 4px 8px;';
-    btn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); triggerInstall(extId); }, true);
-
-    if (addBtn) {
-      // Remplace le texte du bouton original et intercepte son clic
-      addBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); triggerInstall(extId); }, true);
-      addBtn.textContent = addBtn.textContent
-        .replace(/add to chrome/gi, 'Add to Divo')
-        .replace(/ajouter à chrome/gi, 'Ajouter à Divo')
-        .replace(/ajouter/gi, 'Ajouter à Divo');
-      addBtn.parentNode?.insertBefore(btn, addBtn.nextSibling);
-    } else {
-      // Fallback : bouton flottant toujours visible
-      btn.style.cssText += 'position:fixed;top:64px;right:16px;z-index:2147483647;box-shadow:0 2px 12px rgba(0,0,0,.35);';
-      document.body.appendChild(btn);
-    }
-  }
-
-  injectBtn();
-  new MutationObserver(injectBtn).observe(document.body, { childList: true, subtree: true });
-})()`
+// CWS injection supprimée — gérée nativement par electron-chrome-web-store
 
 // ── Handlers nommés (appliqués sur chaque session)
 const CSP_INTERNAL =
@@ -1138,6 +1215,7 @@ app.whenReady().then(async () => {
   initBlocklist()
   setupAdblocker()
   setupCsp()
+  await setupChromeWebStore()
 
   // ── Protocole divo://
   await loadUserExtensions()
@@ -1282,7 +1360,7 @@ app.whenReady().then(async () => {
     // Injecter le polyfill chrome.storage dans les background pages d'extensions
     if (contents.getType() === 'backgroundPage') {
       contents.on('dom-ready', () => {
-        contents.executeJavaScript(EXT_STORAGE_POLYFILL).catch(() => {})
+        if (!contents.isDestroyed()) contents.executeJavaScript(EXT_STORAGE_POLYFILL).catch(() => {})
       })
     }
 
@@ -1349,9 +1427,8 @@ app.whenReady().then(async () => {
           }, true);
         })()`).catch(() => {})
 
-        // Injection Chrome Web Store → remplace "Add to Chrome" par "Add to Divo"
         if (url.includes('chromewebstore.google.com/detail/')) {
-          contents.executeJavaScript(CWS_INJECT_JS).catch(() => {})
+          if (!contents.isDestroyed()) contents.executeJavaScript(CWS_INJECT_JS).catch(() => {})
         }
 
         if (config.webDarkMode && !url.startsWith('divo:')) {
@@ -1367,7 +1444,7 @@ app.whenReady().then(async () => {
       contents.on('did-navigate-in-page', (_, url, isMainFrame) => {
         if (!isMainFrame || !url || url.startsWith('divo:')) return
         if (url.includes('chromewebstore.google.com/detail/')) {
-          contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
+          if (!contents.isDestroyed()) contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
         }
         if (!config.webDarkMode) return
         try {

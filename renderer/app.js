@@ -434,12 +434,14 @@ function wireWebviewEvents(el) {
 
   el.addEventListener('dom-ready', () => {
     el.__ready = true
+    if (el === wv()) { webviewReady = true; updateNavButtons() }
+    const domUrl = el.getURL()
+    if (!domUrl || domUrl === 'about:blank') return
     // Empêcher les sites de détecter qu'ils sont en arrière-plan (évite YouTube qui se met en pause)
     el.executeJavaScript(
       'try{Object.defineProperty(document,"hidden",{get:()=>false,configurable:true});' +
       'Object.defineProperty(document,"visibilityState",{get:()=>"visible",configurable:true})}catch(e){}'
     ).catch(() => {})
-    if (el === wv()) { webviewReady = true; updateNavButtons() }
   })
 
   el.addEventListener('did-start-loading', () => {
@@ -578,8 +580,6 @@ function wireWebviewEvents(el) {
         window.bridge.installExtById(extId).then(res => {
           if (res.ok) {
             createTab('divo://extensions')
-          } else if (res.reason === 'mv3-unsupported') {
-            alert('Cette extension utilise Manifest V3 (service worker) qui n\'est pas supporté par Divo.\n\nSeules les extensions MV2 fonctionnent pour l\'instant.')
           } else if (res.reason) {
             alert('Erreur d\'installation : ' + res.reason)
           }

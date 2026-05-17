@@ -1,6 +1,6 @@
 {
   "name": "divo",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Divo Browser",
   "author": "Divh",
   "main": "main.js",
@@ -27,13 +27,25 @@
     "files": [
       "main.js",
       "preload.js",
+      "ext-sw-polyfill.js",
       "renderer/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "node_modules/electron-chrome-web-store/dist/**/*"
     ],
     "win": {
       "target": [
-        { "target": "nsis",     "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "${productName}.${version}.${ext}",
       "icon": "assets/icon.png",
@@ -84,26 +96,64 @@
     },
     "linux": {
       "target": [
-        { "target": "AppImage", "arch": ["x64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.png",
       "category": "Network"
     },
     "mac": {
       "target": [
-        { "target": "dmg",  "arch": ["x64", "arm64"] },
-        { "target": "zip",  "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "assets/icon.png",
       "category": "public.app-category.productivityapps",
       "protocols": [
-        { "name": "Divo Browser", "schemes": ["http", "https"] }
+        {
+          "name": "Divo Browser",
+          "schemes": [
+            "http",
+            "https"
+          ]
+        }
       ],
       "fileAssociations": [
-        { "ext": "html",  "name": "Divo HTML Document", "description": "Ouvrir avec Divo" },
-        { "ext": "htm",   "name": "Divo HTML Document", "description": "Ouvrir avec Divo" },
-        { "ext": "xhtml", "name": "Divo HTML Document", "description": "Ouvrir avec Divo" }
+        {
+          "ext": "html",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        },
+        {
+          "ext": "htm",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        },
+        {
+          "ext": "xhtml",
+          "name": "Divo HTML Document",
+          "description": "Ouvrir avec Divo"
+        }
       ]
     }
+  },
+  "dependencies": {
+    "electron-chrome-web-store": "^0.13.0"
   }
 }
