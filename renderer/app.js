@@ -221,8 +221,9 @@ function isSpecial(url) {
   catch { return !url }
 }
 function isNewtab(url)   { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'newtab'   } catch { return !url } }
-function isSettings(url) { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'settings' } catch { return false } }
-function isDino(url)     { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'dino'     } catch { return false } }
+function isSettings(url)    { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'settings'   } catch { return false } }
+function isDino(url)        { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'dino'       } catch { return false } }
+function isExtensions(url)  { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'extensions' } catch { return false } }
 function displayUrl(url) { return isSpecial(url) ? '' : url }
 
 function getActiveTabs()   { return tabs.filter(t => t.spaceId === activeSpaceId && !t.archived) }
@@ -553,6 +554,18 @@ function wireWebviewEvents(el) {
       }, 300)
     }
 
+    // Initialisation extensions — injecter la liste via executeJavaScript
+    if (isExtensions(e.url)) {
+      setTimeout(async () => {
+        const exts = await window.bridge.getUserExtensions()
+        if (!el.__ready) return
+        el.executeJavaScript(`
+          window.__divoExts = ${JSON.stringify(exts)};
+          if (typeof window.__divoRefresh === 'function') window.__divoRefresh(${JSON.stringify(exts)});
+        `).catch(() => {})
+      }, 150)
+    }
+
     if (el !== wv()) return
     syncUrlBars(displayUrl(e.url))
     globalPlaying = false; updateMuteBtn(); updateNavButtons()
@@ -577,9 +590,17 @@ function wireWebviewEvents(el) {
       try { if (new URL(currentUrl).hostname !== 'chromewebstore.google.com' && !isSpecial(currentUrl)) return } catch { return }
       const extId = e.title.split(':')[2]
       if (/^[a-z]{32}$/.test(extId)) {
-        window.bridge.installExtById(extId).then(res => {
+        window.bridge.installExtById(extId).then(async res => {
           if (res.ok) {
-            createTab('divo://extensions')
+            // Rafraîchir la page extensions si déjà ouverte, sinon l'ouvrir
+            const extWebview = [...pageWebviews.values()].find(v => { try { return isExtensions(v.getURL()) } catch { return false } })
+            if (extWebview && extWebview.__ready) {
+              const exts = await window.bridge.getUserExtensions()
+              extWebview.executeJavaScript(`if(window.__divoRefresh)window.__divoRefresh(${JSON.stringify(exts)});if(window.__divoToast)window.__divoToast(${JSON.stringify('"' + (res.name||extId) + '" installée')}, 'ok')`).catch(() => {})
+              activateTab(tabs.find(t => isExtensions(t.url))?.id)
+            } else {
+              createTab('divo://extensions')
+            }
           } else if (res.reason) {
             alert('Erreur d\'installation : ' + res.reason)
           }
@@ -615,6 +636,19 @@ function wireWebviewEvents(el) {
     }
     if (e.title === 'divo-settings-action:open-extensions') {
       if (isSettings(currentUrl)) createTab('divo://extensions')
+      return
+    }
+    if (e.title === 'divo-ext-action:open-cws') {
+      createTab('https://chromewebstore.google.com/')
+      return
+    }
+    if (e.title.startsWith('divo-ext-action:toggle:')) {
+      const parts = e.title.split(':')
+      window.bridge.toggleUserExtension(parts[2], parts[3] === 'true')
+      return
+    }
+    if (e.title.startsWith('divo-ext-action:remove:')) {
+      window.bridge.removeUserExtension(e.title.split(':')[2])
       return
     }
     if (e.title === 'divo-settings-action:check-update' && isSettings(currentUrl)) {

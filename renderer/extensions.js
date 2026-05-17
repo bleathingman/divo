@@ -2,9 +2,9 @@ const list       = document.getElementById('ext-list')
 const installing = document.getElementById('installing')
 const toast      = document.getElementById('toast')
 
-document.getElementById('btn-cws').addEventListener('click', e => {
-  e.preventDefault()
-  window.location.href = 'https://chromewebstore.google.com/'
+// Actions → document.title (intercepté par page-title-updated dans app.js)
+document.getElementById('btn-cws').addEventListener('click', () => {
+  document.title = 'divo-ext-action:open-cws'
 })
 
 function showToast(msg, type = 'ok') {
@@ -39,15 +39,13 @@ function renderExt(ext) {
     </div>
   `
 
-  card.querySelector('input[type=checkbox]').addEventListener('change', async function() {
-    const enabled = this.checked
-    const res = await window.bridge.toggleUserExtension(ext.id, enabled)
-    if (!res.ok) { this.checked = !enabled; showToast('Erreur lors du changement d\'état', 'err') }
+  card.querySelector('input[type=checkbox]').addEventListener('change', function() {
+    document.title = 'divo-ext-action:toggle:' + ext.id + ':' + this.checked
   })
 
-  card.querySelector('.remove-btn').addEventListener('click', async () => {
+  card.querySelector('.remove-btn').addEventListener('click', () => {
     if (!confirm(`Supprimer "${ext.name}" ?`)) return
-    await window.bridge.removeUserExtension(ext.id)
+    document.title = 'divo-ext-action:remove:' + ext.id
     card.remove()
     if (!list.querySelector('.ext-card')) list.innerHTML = '<div class="empty">Aucune extension installée</div>'
   })
@@ -55,26 +53,24 @@ function renderExt(ext) {
   return card
 }
 
-async function loadExtensions() {
-  const exts = await window.bridge.getUserExtensions()
+function loadExtensions(exts) {
   list.innerHTML = ''
-  if (!exts.length) {
+  if (!exts || !exts.length) {
     list.innerHTML = '<div class="empty">Aucune extension installée</div>'
     return
   }
   exts.forEach(e => list.appendChild(renderExt(e)))
 }
 
-// Notifié quand une extension vient d'être installée
-window.bridge.onExtensionInstalled(({ name }) => {
+// Exposé globalement — appelé via executeJavaScript depuis app.js
+window.__divoRefresh = function(exts) {
   installing.classList.remove('active')
-  showToast(`"${name}" installée avec succès`, 'ok')
-  loadExtensions()
-})
+  loadExtensions(exts)
+}
 
-// Montrer le spinner si une installation est en cours (déclenché depuis la CWS)
-window.addEventListener('message', e => {
-  if (e.data === 'divo:installing') installing.classList.add('active')
-})
+window.__divoToast = function(msg, type) {
+  showToast(msg, type)
+}
 
-loadExtensions()
+// Chargement initial depuis les données injectées
+loadExtensions(window.__divoExts || [])
