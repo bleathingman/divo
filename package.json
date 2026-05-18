@@ -1,6 +1,6 @@
 {
   "name": "divo",
-  "version": "1.4.5",
+  "version": "1.5.0",
   "description": "Divo Browser",
   "author": "Divh",
   "main": "main.js",
@@ -34,18 +34,9 @@
     ],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "msix",     "arch": ["x64"] }
       ],
       "artifactName": "${productName}.${version}.${ext}",
       "icon": "assets/icon.png",
@@ -85,6 +76,14 @@
           "description": "Ouvrir avec Divo"
         }
       ]
+    },
+    "msix": {
+      "identityName": "Divh.Divo",
+      "identityPublisher": "CN=Divh",
+      "publisherDisplayName": "Divh",
+      "applicationId": "Divo",
+      "backgroundColor": "#111113",
+      "artifactName": "${productName}.${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,

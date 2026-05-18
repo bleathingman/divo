@@ -49,7 +49,7 @@ jobs:
 
       - name: Lister les fichiers dist (debug nommage)
         shell: pwsh
-        run: Get-ChildItem dist\*.exe | Select-Object Name, Length
+        run: Get-ChildItem dist\*.exe, dist\*.msix | Select-Object Name, Length
 
       - name: Signature Authenticode via module SignPath officiel
         continue-on-error: true
@@ -90,7 +90,7 @@ jobs:
 
       - name: SHA256SUMS + upload Windows
         run: |
-          $files = Get-ChildItem dist\*.exe | Select-Object -ExpandProperty FullName
+          $files = Get-ChildItem dist\*.exe, dist\*.msix | Select-Object -ExpandProperty FullName
           $sumsFile = "dist\SHA256SUMS-windows.txt"
           foreach ($f in $files) {
             $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
@@ -105,7 +105,9 @@ jobs:
       - name: Attestation de provenance SLSA (Windows)
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
         with:
-          subject-path: 'dist/*.exe'
+          subject-path: |
+            dist/*.exe
+            dist/*.msix
 
   build-linux:
     needs: create-release
