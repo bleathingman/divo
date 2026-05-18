@@ -50,6 +50,16 @@ let config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
 try { Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8'))) } catch {}
 function saveConfig() { try { fs.writeFileSync(configPath, JSON.stringify(config)) } catch (e) { console.error('saveConfig error', e) } }
 
+// ── État navigateur persistant (essentials, favoris, onglets, espaces)
+const statePath = path.join(app.getPath('userData'), 'state.json')
+let cachedAppState = null
+try { cachedAppState = JSON.parse(fs.readFileSync(statePath, 'utf-8')) } catch {}
+function writeAppState(s) { try { fs.writeFileSync(statePath, JSON.stringify(s)) } catch {} }
+
+ipcMain.handle('state-load', () => cachedAppState)
+ipcMain.handle('state-save', (_, s) => { cachedAppState = s; writeAppState(s) })
+ipcMain.on('state-load-sync', e => { e.returnValue = cachedAppState })
+
 // ── Adblocker (uBlock Origin-style)
 const BL_DIR = app.getPath('userData')
 const BL_VER = 'v6'
@@ -1168,6 +1178,19 @@ function createWindow() {
 
   mainWindow.loadFile('renderer/index.html')
   mainWindow.once('ready-to-show', () => mainWindow.show())
+
+  // Sauvegarde synchrone de l'état avant fermeture
+  let closing = false
+  mainWindow.on('close', async e => {
+    if (closing) return
+    e.preventDefault()
+    closing = true
+    try {
+      const raw = await mainWindow.webContents.executeJavaScript('window.__getState ? window.__getState() : null')
+      if (raw) writeAppState(JSON.parse(raw))
+    } catch {}
+    mainWindow.destroy()
+  })
   mainWindow.on('enter-full-screen', () => mainWindow.webContents.send('fullscreen-change', true))
   mainWindow.on('leave-full-screen',  () => mainWindow.webContents.send('fullscreen-change', false))
 

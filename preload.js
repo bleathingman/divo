@@ -1,5 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Chargé synchronement avant que app.js tourne — élimine tout problème de timing
+const __divoInitState = ipcRenderer.sendSync('state-load-sync')
+
 contextBridge.exposeInMainWorld('bridge', {
   minimize:             () => ipcRenderer.send('window-minimize'),
   maximize:             () => ipcRenderer.send('window-maximize'),
@@ -42,4 +45,6 @@ contextBridge.exposeInMainWorld('bridge', {
   removeUserExtension:  (id)  => ipcRenderer.invoke('remove-user-extension', id),
   toggleUserExtension:  (id, enabled) => ipcRenderer.invoke('toggle-user-extension', id, enabled),
   onExtensionInstalled: (cb)  => ipcRenderer.on('extension-installed', (_, d) => cb(d)),
+  initState: __divoInitState,
+  stateSave: (s)   => ipcRenderer.invoke('state-save', s),
 })

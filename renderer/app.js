@@ -268,46 +268,68 @@ function updatePrivateUI() {
 // PERSISTENCE
 // ============================================================
 
+function getCurrentState() {
+  const curSpace = spaces.find(s => s.id === activeSpaceId)
+  if (curSpace) curSpace.activeTabId = activeTabId
+  return {
+    essentials,
+    favorites,
+    tabs:             tabs.filter(t => !t.private),
+    spaces,
+    activeSpaceId:    activeSpaceId    || '',
+    activeEssentialId: activeEssentialId || '',
+  }
+}
+
+// Exposé globalement pour la sauvegarde synchrone à la fermeture (main.js)
+window.__getState = () => JSON.stringify(getCurrentState())
+
 function saveState() {
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     try {
-      const curSpace = spaces.find(s => s.id === activeSpaceId)
-      if (curSpace) curSpace.activeTabId = activeTabId
-      localStorage.setItem('arc-essentials', JSON.stringify(essentials))
-      localStorage.setItem('arc-favorites',  JSON.stringify(favorites))
-      localStorage.setItem('arc-tabs',       JSON.stringify(tabs.filter(t => !t.private)))
-      localStorage.setItem('arc-spaces',     JSON.stringify(spaces))
-      localStorage.setItem('arc-active-space', activeSpaceId || '')
-      localStorage.setItem('arc-active-ess',   activeEssentialId || '')
+      const s = getCurrentState()
+      localStorage.setItem('arc-essentials',   JSON.stringify(s.essentials))
+      localStorage.setItem('arc-favorites',    JSON.stringify(s.favorites))
+      localStorage.setItem('arc-tabs',         JSON.stringify(s.tabs))
+      localStorage.setItem('arc-spaces',       JSON.stringify(s.spaces))
+      localStorage.setItem('arc-active-space', s.activeSpaceId)
+      localStorage.setItem('arc-active-ess',   s.activeEssentialId)
+      window.bridge.stateSave(s).catch(() => {})
     } catch {}
   }, 400)
 }
 
 function loadState() {
+  // Priorité : state.json chargé synchronement via preload → localStorage (migration)
+  const file = window.bridge.initState || null
+
   const VERSION = '3'
-  if (localStorage.getItem('arc-version') !== VERSION) {
+  if (!file && localStorage.getItem('arc-version') !== VERSION) {
     localStorage.clear(); localStorage.setItem('arc-version', VERSION)
   }
+
+  const gj = k => { try { if (file) return file[k] ?? null; const v = localStorage.getItem('arc-' + k); return v ? JSON.parse(v) : null } catch { return null } }
+
   try {
     // Spaces
-    const ss = localStorage.getItem('arc-spaces')
-    spaces = ss ? JSON.parse(ss) : []
+    const ss = gj('spaces')
+    spaces = ss || []
     if (!spaces.length) spaces = [{ id: 'sp_default', name: 'Principal', color: SPACE_COLORS[0], activeTabId: null }]
-    activeSpaceId = localStorage.getItem('arc-active-space') || spaces[0].id
+    activeSpaceId = (file ? file.activeSpaceId : (localStorage.getItem('arc-active-space') || '')) || spaces[0].id
     if (!spaces.find(s => s.id === activeSpaceId)) activeSpaceId = spaces[0].id
 
     // Essentials
-    const se = localStorage.getItem('arc-essentials')
-    essentials = se ? JSON.parse(se).map(e => ({
+    const se = gj('essentials')
+    essentials = se ? se.map(e => ({
       ...e,
       url:     safeTabUrl(e.url),
       favicon: safeFavicon(e.favicon) || null,
     })) : structuredClone(DEFAULT_ESSENTIALS)
 
     // Favorites — migration: ajoute spaceId si absent
-    const sf = localStorage.getItem('arc-favorites')
-    favorites = sf ? JSON.parse(sf).map(f => ({
+    const sf = gj('favorites')
+    favorites = sf ? sf.map(f => ({
       ...f,
       url:     safeTabUrl(f.url),
       favicon: safeFavicon(f.favicon) || null,
@@ -315,8 +337,7 @@ function loadState() {
     })) : []
 
     // Tabs — migrate legacy tabs without spaceId / lastUsed
-    const st = localStorage.getItem('arc-tabs')
-    const parsed = st ? JSON.parse(st) : []
+    const parsed = gj('tabs') || []
     tabs = parsed.map(t => ({
       ...t,
       url:      safeTabUrl(t.url),
@@ -333,7 +354,7 @@ function loadState() {
     }
 
     // Active state
-    const sae = localStorage.getItem('arc-active-ess')
+    const sae = file ? file.activeEssentialId : localStorage.getItem('arc-active-ess')
     const curSpace = spaces.find(s => s.id === activeSpaceId)
     if (sae && essentials.find(e => e.id === sae)) {
       activeEssentialId = sae; activeTabId = null
