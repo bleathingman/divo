@@ -79,7 +79,7 @@
     },
     "appx": {
       "identityName": "Divh.Divo",
-      "identityPublisher": "CN=Divh",
+      "publisher": "CN=Divh",
       "publisherDisplayName": "Divh",
       "applicationId": "Divo",
       "backgroundColor": "#111113",
