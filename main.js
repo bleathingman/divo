@@ -1058,6 +1058,57 @@ function createWindow() {
     }
   })
 
+  // Enregistrer divo:// pour toutes les sessions AVANT le chargement de la page
+  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html', extensions: 'extensions.html' }
+  const DIVO_MIME  = { '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
+                       '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+                       '.woff': 'font/woff', '.woff2': 'font/woff2' }
+  const RENDERER_DIR = path.join(__dirname, 'renderer')
+  function makeDivoHandler() {
+    return (request) => {
+      const url = new URL(request.url)
+      const { hostname, pathname } = url
+      if (pathname && pathname !== '/') {
+        const rel      = path.normalize(pathname.replace(/^\/+/, ''))
+        const filePath = path.join(RENDERER_DIR, rel)
+        if (!filePath.startsWith(RENDERER_DIR + path.sep) && filePath !== RENDERER_DIR)
+          return new Response('Forbidden', { status: 403 })
+        const mime = DIVO_MIME[path.extname(rel).toLowerCase()]
+        if (!mime || !fs.existsSync(filePath)) return new Response('Not found', { status: 404 })
+        return new Response(fs.readFileSync(filePath), { headers: { 'Content-Type': mime } })
+      }
+      if (hostname === 'ext-icon') {
+        const iconRel  = pathname.replace(/^\/+/, '')
+        const parts    = iconRel.split('/')
+        const extId    = parts.shift()
+        const iconPath = parts.join('/')
+        if (/^[a-z]{32}$/.test(extId) && iconPath) {
+          const extDir = findExtDir(path.join(USER_EXT_DIR, extId))
+          const iconFile = path.join(extDir, iconPath)
+          if (fs.existsSync(iconFile)) {
+            const mime = DIVO_MIME[path.extname(iconPath).toLowerCase()] || 'image/png'
+            return new Response(fs.readFileSync(iconFile), { headers: { 'Content-Type': mime } })
+          }
+        }
+        return new Response('Not found', { status: 404 })
+      }
+      const file = DIVO_PAGES[hostname]
+      if (file) {
+        const theme  = config.theme || 'dark'
+        const dlPath = (config.downloadPath || app.getPath('downloads')).replace(/"/g, '&quot;')
+        const html = fs.readFileSync(path.join(RENDERER_DIR, file), 'utf-8')
+          .replace('<html lang="fr">', `<html lang="fr" data-theme="${theme}">`)
+          .replace('</head>', `<meta name="divo-dl-path" content="${dlPath}">\n</head>`)
+        return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+      }
+      return new Response('Not found', { status: 404 })
+    }
+  }
+  try { protocol.handle('divo', makeDivoHandler()) } catch {}
+  for (const partition of ['persist:divo', 'private:incognito']) {
+    try { session.fromPartition(partition).protocol.handle('divo', makeDivoHandler()) } catch {}
+  }
+
   mainWindow.loadFile('renderer/index.html')
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
@@ -1160,61 +1211,8 @@ app.whenReady().then(async () => {
   setupCsp()
   await setupChromeWebStore()
 
-  // ── Protocole divo://
+  // ── Extensions utilisateur
   await loadUserExtensions()
-
-  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html', extensions: 'extensions.html' }
-  const DIVO_MIME  = { '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
-                       '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
-                       '.woff': 'font/woff', '.woff2': 'font/woff2' }
-  const RENDERER_DIR = path.join(__dirname, 'renderer')
-
-  protocol.handle('divo', (request) => {
-    const url      = new URL(request.url)
-    const { hostname, pathname } = url
-
-    // Sous-ressources statiques (newtab.js, settings.js, style.css…)
-    if (pathname && pathname !== '/') {
-      const rel      = path.normalize(pathname.replace(/^\/+/, ''))
-      const filePath = path.join(RENDERER_DIR, rel)
-      // Garde path-traversal : le chemin résolu doit rester dans renderer/
-      if (!filePath.startsWith(RENDERER_DIR + path.sep) && filePath !== RENDERER_DIR) {
-        return new Response('Forbidden', { status: 403 })
-      }
-      const mime = DIVO_MIME[path.extname(rel).toLowerCase()]
-      if (!mime || !fs.existsSync(filePath)) return new Response('Not found', { status: 404 })
-      return new Response(fs.readFileSync(filePath), { headers: { 'Content-Type': mime } })
-    }
-
-    // Icônes d'extensions : divo://ext-icon/{extId}/{...chemin}
-    if (hostname === 'ext-icon') {
-      const iconRel  = pathname.replace(/^\/+/, '')
-      const parts    = iconRel.split('/')
-      const extId    = parts.shift()
-      const iconPath = parts.join('/')
-      if (/^[a-z]{32}$/.test(extId) && iconPath) {
-        const extDir = findExtDir(path.join(USER_EXT_DIR, extId))
-        const iconFile = path.join(extDir, iconPath)
-        if (fs.existsSync(iconFile)) {
-          const mime = DIVO_MIME[path.extname(iconPath).toLowerCase()] || 'image/png'
-          return new Response(fs.readFileSync(iconFile), { headers: { 'Content-Type': mime } })
-        }
-      }
-      return new Response('Not found', { status: 404 })
-    }
-
-    // Page principale
-    const file = DIVO_PAGES[hostname]
-    if (file) {
-      const theme  = config.theme || 'dark'
-      const dlPath = (config.downloadPath || app.getPath('downloads')).replace(/"/g, '&quot;')
-      const html = fs.readFileSync(path.join(RENDERER_DIR, file), 'utf-8')
-        .replace('<html lang="fr">', `<html lang="fr" data-theme="${theme}">`)
-        .replace('</head>', `<meta name="divo-dl-path" content="${dlPath}">\n</head>`)
-      return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
-    }
-    return new Response('Not found', { status: 404 })
-  })
   // ── Téléchargements — appliqués sur toutes les sessions (persist:divo + private:incognito)
   const safeFilename = raw =>
     path.basename(String(raw || 'download'))
