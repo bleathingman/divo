@@ -5,9 +5,6 @@ const { spawn } = require('child_process')
 const crypto = require('crypto')
 const { installChromeWebStore, installExtension, uninstallExtension } = require('electron-chrome-web-store')
 
-// Désactive l'accélération GPU pour éviter les crashs GPU silencieux
-app.disableHardwareAcceleration()
-
 // ── Crash logging
 const LOG_PATH = path.join(app.getPath('userData'), 'crash.log')
 function writeLog(msg) {
