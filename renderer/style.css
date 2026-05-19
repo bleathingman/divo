@@ -1462,6 +1462,12 @@ body.light .ctx-label { color: #8e8e93 }
 
 body.light .folder-icon-svg { color: #d97700 }
 
+/* ── Fullscreen vidéo (HTML5) ── */
+body.webview-fullscreen .sidebar        { display: none !important }
+body.webview-fullscreen .top-tab-bar    { display: none !important }
+body.webview-fullscreen .titlebar       { display: none !important }
+body.webview-fullscreen .content webview { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 9999 }
+
 /* ── Mode focus ── */
 body.focus-mode .sidebar {
   width: 0 !important;

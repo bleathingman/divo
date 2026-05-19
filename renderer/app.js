@@ -785,6 +785,15 @@ function wireWebviewEvents(el) {
     if (e.disposition === 'save-to-disk') return
     e.preventDefault(); if (e.url) createTab(e.url)
   })
+
+  el.addEventListener('enter-html-full-screen', () => {
+    if (el !== wv()) return
+    document.body.classList.add('webview-fullscreen')
+  })
+
+  el.addEventListener('leave-html-full-screen', () => {
+    document.body.classList.remove('webview-fullscreen')
+  })
 }
 
 // ============================================================
