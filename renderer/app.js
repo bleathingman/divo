@@ -302,7 +302,7 @@ function saveState() {
 
 function loadState() {
   // Priorité : state.json chargé synchronement via preload → localStorage (migration)
-  const file = window.bridge.initState || null
+  const file = window.bridge.initState ? JSON.parse(JSON.stringify(window.bridge.initState)) : null
 
   const VERSION = '3'
   if (!file && localStorage.getItem('arc-version') !== VERSION) {
@@ -489,7 +489,7 @@ function wireWebviewEvents(el) {
       try { window.bridge.focusWebview(el.getWebContentsId()) } catch {}
       setTimeout(() => {
         el.executeJavaScript(
-          'const s=document.getElementById("search");if(s){s.focus();s.select();}'
+          '(function(){var s=document.getElementById("search");if(s){s.focus();s.select();}})()'
         ).catch(() => {})
       }, 80)
     }
@@ -1396,6 +1396,7 @@ function startRenameSpace(id) {
   const input  = document.createElement('input')
   input.type = 'text'; input.value = space.name; input.className = 'space-rename-input'
   nameEl.replaceWith(input); input.focus(); input.select()
+  btn.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' })
   let done = false
   function commit() {
     if (done) return; done = true
