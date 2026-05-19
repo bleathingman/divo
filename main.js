@@ -1062,7 +1062,7 @@ function createWindow() {
   })
 
   // Enregistrer divo:// pour toutes les sessions AVANT le chargement de la page
-  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html', extensions: 'extensions.html' }
+  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html', extensions: 'extensions.html', secret: 'secret.html' }
   const DIVO_MIME  = { '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
                        '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
                        '.woff': 'font/woff', '.woff2': 'font/woff2' }

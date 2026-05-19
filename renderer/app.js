@@ -670,6 +670,10 @@ function wireWebviewEvents(el) {
       if (isSettings(currentUrl)) createTab('divo://extensions')
       return
     }
+    if (e.title === 'divo-settings-action:open-secret') {
+      if (isSettings(currentUrl)) createTab('divo://secret')
+      return
+    }
     if (e.title === 'divo-ext-action:open-cws') {
       createTab('https://chromewebstore.google.com/')
       return

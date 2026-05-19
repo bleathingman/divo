@@ -51,3 +51,13 @@ document.getElementById('update-action-btn').addEventListener('click', function(
     document.title = 'divo-settings-action:check-update:' + Date.now()
   }
 })
+
+;(function() {
+  let clicks = 0, timer = null
+  document.getElementById('secret-trigger').addEventListener('click', () => {
+    clicks++
+    clearTimeout(timer)
+    timer = setTimeout(() => { clicks = 0 }, 800)
+    if (clicks >= 5) { clicks = 0; document.title = 'divo-settings-action:open-secret' }
+  })
+})()
