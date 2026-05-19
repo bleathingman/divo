@@ -2,6 +2,17 @@
 // DIVO BROWSER — renderer/app.js
 // ============================================================
 
+window.onerror = (msg, src, line, col, err) => {
+  const txt = `${msg} @ ${src}:${line}:${col}\n${err?.stack || ''}`
+  console.error('[CRASH]', txt)
+  try { window.bridge.rendererLog('onerror: ' + txt) } catch {}
+}
+window.addEventListener('unhandledrejection', e => {
+  const txt = e.reason?.stack || String(e.reason)
+  console.error('[UNHANDLED PROMISE]', txt)
+  try { window.bridge.rendererLog('unhandledrejection: ' + txt) } catch {}
+})
+
 document.getElementById('btn-close').addEventListener('click', () => window.bridge.close())
 document.getElementById('btn-minimize').addEventListener('click', () => window.bridge.minimize())
 document.getElementById('btn-maximize').addEventListener('click', () => window.bridge.maximize())

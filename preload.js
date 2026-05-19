@@ -47,4 +47,5 @@ contextBridge.exposeInMainWorld('bridge', {
   onExtensionInstalled: (cb)  => ipcRenderer.on('extension-installed', (_, d) => cb(d)),
   initState: __divoInitState,
   stateSave: (s)   => ipcRenderer.invoke('state-save', s),
+  rendererLog: (msg) => ipcRenderer.send('renderer-log', msg),
 })
