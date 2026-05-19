@@ -110,7 +110,7 @@ function safeColor(c) { return CSS_COLOR_RE.test(String(c || '')) ? c : '#0a84ff
 
 function wv() {
   const key = activeEssentialId || activeTabId
-  return (key && pageWebviews.get(key)) || null
+  return (key && pageWebviews.get(key)) || webview
 }
 
 // ── Virtual list — rend uniquement les items visibles
