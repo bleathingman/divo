@@ -1191,6 +1191,30 @@ app.whenReady().then(async () => {
     }
     return new Response('Not found', { status: 404 })
   })
+  // Même handler pour la session privée (protocol.handle est par défaut sur la session principale)
+  session.fromPartition('private:incognito').protocol.handle('divo', (request) => {
+    const url = new URL(request.url)
+    const { hostname, pathname } = url
+    if (pathname && pathname !== '/') {
+      const rel      = path.normalize(pathname.replace(/^\/+/, ''))
+      const filePath = path.join(RENDERER_DIR, rel)
+      if (!filePath.startsWith(RENDERER_DIR + path.sep) && filePath !== RENDERER_DIR)
+        return new Response('Forbidden', { status: 403 })
+      const mime = DIVO_MIME[path.extname(rel).toLowerCase()]
+      if (!mime || !fs.existsSync(filePath)) return new Response('Not found', { status: 404 })
+      return new Response(fs.readFileSync(filePath), { headers: { 'Content-Type': mime } })
+    }
+    const file = DIVO_PAGES[hostname]
+    if (file) {
+      const theme  = config.theme || 'dark'
+      const dlPath = (config.downloadPath || app.getPath('downloads')).replace(/"/g, '&quot;')
+      const html = fs.readFileSync(path.join(RENDERER_DIR, file), 'utf-8')
+        .replace('<html lang="fr">', `<html lang="fr" data-theme="${theme}">`)
+        .replace('</head>', `<meta name="divo-dl-path" content="${dlPath}">\n</head>`)
+      return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    }
+    return new Response('Not found', { status: 404 })
+  })
 
   // ── Téléchargements — appliqués sur toutes les sessions (persist:divo + private:incognito)
   const safeFilename = raw =>

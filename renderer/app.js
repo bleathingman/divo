@@ -10,8 +10,6 @@ const NEWTAB_URL = window.bridge.newtabUrl
 const SETTINGS_URL = window.bridge.settingsUrl
 
 // ── DOM
-const webview          = document.getElementById('webview')
-const webviewPrivate   = document.getElementById('webview-private')
 
 // SEC-307 — fallback favicon : masque les <img> cassées sans onerror inline (bloqué par CSP)
 document.addEventListener('error', e => {
@@ -109,11 +107,9 @@ function safeTabUrl(u) {
 const CSS_COLOR_RE = /^#[0-9a-f]{3,8}$|^rgba?\([\d.,\s/%]+\)$|^hsla?\([\d.,\s/%]+\)$|^[a-z]{2,30}$/i
 function safeColor(c) { return CSS_COLOR_RE.test(String(c || '')) ? c : '#0a84ff' }
 
-// SEC-001 — retourne le webview actif (pool normal ou privé)
 function wv() {
-  if (activeTabIsPrivate()) return webviewPrivate
   const key = activeEssentialId || activeTabId
-  return (key && pageWebviews.get(key)) || webview
+  return (key && pageWebviews.get(key)) || null
 }
 
 // ── Virtual list — rend uniquement les items visibles
@@ -442,6 +438,9 @@ function allocWebview(key) {
   if (pageWebviews.size >= MAX_POOL) evictLRU(key)
   const el = document.createElement('webview')
   el.setAttribute('allowpopups', '')
+  el.setAttribute('disableblinkfeatures', 'AuxClick')
+  const tab = tabs.find(t => t.id === key)
+  el.setAttribute('partition', tab?.private ? 'private:incognito' : 'persist:divo')
   el.__key   = key
   el.__ready = false
   el.style.display = 'none'
@@ -795,15 +794,6 @@ function navigate(url, preserveContent = false) {
   url = normalizeUrl(url)
   syncUrlBars(displayUrl(url))
 
-  if (activeTabIsPrivate()) {
-    for (const v of pageWebviews.values()) v.style.display = 'none'
-    webviewPrivate.style.display = ''
-    if (webviewPrivate.__ready) webviewPrivate.loadURL(url).catch(() => {})
-    else webviewPrivate.src = url
-    saveState(); return
-  }
-
-  webviewPrivate.style.display = 'none'
   const key = activeEssentialId || activeTabId
   if (!key) { saveState(); return }
 
@@ -2208,88 +2198,6 @@ essentialsList.addEventListener('dragend', () => { essentialsList.classList.remo
 // ============================================================
 
 
-// ============================================================
-// ÉVÉNEMENTS — WEBVIEW PRIVÉ (SEC-001)
-// ============================================================
-
-webviewPrivate.addEventListener('dom-ready', () => {
-  webviewPrivate.__ready = true
-  if (activeTabIsPrivate()) { webviewReady = true; updateNavButtons() }
-})
-
-webviewPrivate.addEventListener('did-start-loading', () => {
-  if (!activeTabIsPrivate()) return
-  isLoading = true; btnReload.innerHTML = ICON_STOP; btnReload.title = 'Arrêter'; startProgress()
-})
-
-webviewPrivate.addEventListener('did-stop-loading', () => {
-  if (!activeTabIsPrivate()) return
-  isLoading = false; btnReload.innerHTML = ICON_RELOAD; btnReload.title = 'Recharger'
-  completeProgress(); updateNavButtons()
-})
-
-webviewPrivate.addEventListener('did-navigate', e => {
-  if (!activeTabIsPrivate()) return
-  syncUrlBars(displayUrl(e.url))
-  if (activeTabId && !activeEssentialId) {
-    const tab = tabs.find(t => t.id === activeTabId)
-    if (tab) { tab.url = e.url; saveState() }
-  }
-  globalPlaying = false; updateMuteBtn(); updateNavButtons()
-  if (findBar.classList.contains('visible')) closeFind()
-  permBar.classList.remove('visible')
-})
-
-webviewPrivate.addEventListener('did-navigate-in-page', e => {
-  if (!activeTabIsPrivate() || !e.isMainFrame) return
-  syncUrlBars(displayUrl(e.url))
-  if (activeTabId && !activeEssentialId) {
-    const tab = tabs.find(t => t.id === activeTabId)
-    if (tab) { tab.url = e.url; saveState() }
-  }
-  updateNavButtons()
-})
-
-webviewPrivate.addEventListener('page-title-updated', e => {
-  if (!activeTabIsPrivate()) return
-  if (!activeTabId || activeEssentialId) return
-  const tab = tabs.find(t => t.id === activeTabId)
-  if (!tab || isSpecial(tab.url)) return
-  if (tab.title !== e.title) { tab.title = e.title; saveState(); renderTabs() }
-})
-
-webviewPrivate.addEventListener('page-favicon-updated', e => {
-  // Pas de favicon en mode privé
-})
-
-webviewPrivate.addEventListener('media-started-playing', () => {
-  if (!activeTabIsPrivate()) return
-  globalPlaying = true; updateMuteBtn()
-  mediaTabId = activeEssentialId ? null : activeTabId
-  mediaEssentialId = activeEssentialId || null
-  if (mediaTabId) { const tab = tabs.find(t => t.id === mediaTabId); if (tab && !tab.playing) { tab.playing = true; renderTabs() } }
-  updateMiniPlayer()
-})
-
-webviewPrivate.addEventListener('media-paused', () => {
-  if (!activeTabIsPrivate()) return
-  globalPlaying = false; updateMuteBtn()
-  if (mediaTabId) { const tab = tabs.find(t => t.id === mediaTabId); if (tab) { tab.playing = false; renderTabs() } mediaTabId = null }
-  mediaEssentialId = null
-  updateMiniPlayer()
-})
-
-webviewPrivate.addEventListener('found-in-page', e => {
-  if (!activeTabIsPrivate()) return
-  const { activeMatchOrdinal, matches } = e.result
-  if (matches > 0) { findCount.textContent = `${activeMatchOrdinal}/${matches}`; findCount.classList.remove('no-result') }
-  else { findCount.textContent = 'Introuvable'; findCount.classList.add('no-result') }
-})
-
-webviewPrivate.addEventListener('new-window', e => {
-  if (e.disposition === 'save-to-disk') return
-  e.preventDefault(); if (e.url) createTab(e.url, true)
-})
 
 
 
