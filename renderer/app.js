@@ -672,7 +672,7 @@ function wireWebviewEvents(el) {
       window.bridge.removeUserExtension(e.title.split(':')[2])
       return
     }
-    if (e.title === 'divo-settings-action:check-update' && isSettings(currentUrl)) {
+    if (e.title.startsWith('divo-settings-action:check-update') && isSettings(currentUrl)) {
       el.executeJavaScript(`
         const b = document.getElementById('update-action-btn');
         if (b) { b.textContent = 'Vérification…'; b.disabled = true; }

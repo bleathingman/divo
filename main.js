@@ -994,8 +994,9 @@ async function checkForUpdate() {
     const asset = process.platform === 'linux'  ? rel.assets?.find(a => /\.AppImage$/i.test(a.name))
                : process.platform === 'darwin' ? rel.assets?.find(a => /\.dmg$/i.test(a.name))
                :                                 rel.assets?.find(a => /Setup.*\.exe$/i.test(a.name))
-    // L'URL reste côté main — le renderer ne la reçoit jamais
-    pendingUpdateUrl     = asset?.browser_download_url || null
+    // Ne notifier que si le fichier est réellement disponible en téléchargement
+    if (!asset?.browser_download_url) return
+    pendingUpdateUrl     = asset.browser_download_url
     pendingUpdateVersion = latest
     mainWindow?.webContents.send('update-available', { version: latest })
   } catch (e) { console.error('checkForUpdate error', e) }
