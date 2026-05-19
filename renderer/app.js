@@ -1367,6 +1367,8 @@ function deleteSpace(id) {
   saveState(); render()
 }
 
+let dragSpaceId = null
+
 function renderSpaces() {
   const frag = document.createDocumentFragment()
   for (const space of spaces) {
@@ -1374,6 +1376,7 @@ function renderSpaces() {
     btn.className = 'space-pill' + (space.id === activeSpaceId ? ' active' : '')
     btn.dataset.spaceId = space.id
     btn.title = space.name
+    btn.draggable = true
     const dot = document.createElement('span')
     dot.className = 'space-color-dot'
     dot.style.background = safeColor(space.color)
@@ -1381,9 +1384,41 @@ function renderSpaces() {
     lbl.className = 'space-pill-name'
     lbl.textContent = space.name
     btn.appendChild(dot); btn.appendChild(lbl)
-    btn.addEventListener('click', () => switchSpace(space.id))
+    btn.addEventListener('click', () => { if (!dragSpaceId) switchSpace(space.id) })
     btn.addEventListener('dblclick', e => { e.preventDefault(); if (space.id === activeSpaceId) startRenameSpace(space.id) })
     btn.addEventListener('contextmenu', e => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, space.id, 'space') })
+    btn.addEventListener('dragstart', e => {
+      dragSpaceId = space.id
+      e.dataTransfer.effectAllowed = 'move'
+      setTimeout(() => btn.classList.add('dragging'), 0)
+    })
+    btn.addEventListener('dragend', () => {
+      dragSpaceId = null
+      spacesList.querySelectorAll('.space-pill').forEach(el => el.classList.remove('dragging', 'drag-over-left', 'drag-over-right'))
+    })
+    btn.addEventListener('dragover', e => {
+      if (!dragSpaceId || dragSpaceId === space.id) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      spacesList.querySelectorAll('.space-pill').forEach(el => el.classList.remove('drag-over-left', 'drag-over-right'))
+      const rect = btn.getBoundingClientRect()
+      const mid  = rect.left + rect.width / 2
+      btn.classList.add(e.clientX < mid ? 'drag-over-left' : 'drag-over-right')
+    })
+    btn.addEventListener('dragleave', () => btn.classList.remove('drag-over-left', 'drag-over-right'))
+    btn.addEventListener('drop', e => {
+      e.preventDefault()
+      if (!dragSpaceId || dragSpaceId === space.id) return
+      const fromIdx = spaces.findIndex(s => s.id === dragSpaceId)
+      const toIdx   = spaces.findIndex(s => s.id === space.id)
+      if (fromIdx === -1 || toIdx === -1) return
+      const rect = btn.getBoundingClientRect()
+      const insertAfter = e.clientX >= rect.left + rect.width / 2
+      const [moved] = spaces.splice(fromIdx, 1)
+      const newIdx  = spaces.findIndex(s => s.id === space.id)
+      spaces.splice(insertAfter ? newIdx + 1 : newIdx, 0, moved)
+      saveState(); renderSpaces()
+    })
     frag.appendChild(btn)
   }
   spacesList.replaceChildren(frag)

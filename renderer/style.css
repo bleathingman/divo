@@ -247,6 +247,10 @@ body.private-active .nav-row .nav-btn:hover:not(:disabled) {
   max-width: 90px
 }
 
+.space-pill.dragging { opacity: .4; cursor: grabbing }
+.space-pill.drag-over-left  { box-shadow: -3px 0 0 #0a84ff }
+.space-pill.drag-over-right { box-shadow:  3px 0 0 #0a84ff }
+
 .space-rename-input {
   background: transparent;
   border: none;
