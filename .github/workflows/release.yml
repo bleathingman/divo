@@ -98,6 +98,7 @@ jobs:
             gh release upload "${{ github.ref_name }}" $f --clobber
           }
           gh release upload "${{ github.ref_name }}" $sumsFile --clobber
+          if (Test-Path dist\latest.yml) { gh release upload "${{ github.ref_name }}" dist\latest.yml --clobber }
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -132,6 +133,7 @@ jobs:
           sha256sum dist/*.AppImage > dist/SHA256SUMS-linux.txt
           gh release upload "${{ github.ref_name }}" dist/*.AppImage --clobber
           gh release upload "${{ github.ref_name }}" dist/SHA256SUMS-linux.txt --clobber
+          [ -f dist/latest-linux.yml ] && gh release upload "${{ github.ref_name }}" dist/latest-linux.yml --clobber || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Attestation de provenance SLSA (Linux)
@@ -168,6 +170,7 @@ jobs:
           shasum -a 256 dist/*.dmg > dist/SHA256SUMS-macos.txt
           gh release upload "${{ github.ref_name }}" dist/*.dmg --clobber
           gh release upload "${{ github.ref_name }}" dist/SHA256SUMS-macos.txt --clobber
+          [ -f dist/latest-mac.yml ] && gh release upload "${{ github.ref_name }}" dist/latest-mac.yml --clobber || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Attestation de provenance SLSA (macOS)

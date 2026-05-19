@@ -1,6 +1,6 @@
 {
   "name": "divo",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Divo Browser",
   "author": "Divh",
   "main": "main.js",
@@ -21,6 +21,11 @@
     "appId": "com.divh.divo",
     "productName": "Divo",
     "copyright": "Divh",
+    "publish": {
+      "provider": "github",
+      "owner": "bleathingman",
+      "repo": "divo"
+    },
     "directories": {
       "output": "dist"
     },
@@ -153,6 +158,7 @@
     }
   },
   "dependencies": {
-    "electron-chrome-web-store": "^0.13.0"
+    "electron-chrome-web-store": "^0.13.0",
+    "electron-updater": "^6.3.9"
   }
 }

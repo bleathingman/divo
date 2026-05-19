@@ -963,43 +963,31 @@ const WEB_DARK_SKIP = [
   'miro.com',
 ]
 
-// ── Auto-update
+// ── Auto-update via electron-updater
 const REPO = 'bleathingman/divo'
-const UPDATE_INTERVAL = 4 * 60 * 60 * 1000
-function isAllowedUpdateHost(h) {
-  return h === 'github.com' || h === 'api.github.com' || h.endsWith('.githubusercontent.com')
-}
-let pendingUpdateUrl     = null
 let pendingUpdateVersion = null
 
-function semverGt(a, b) {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return true
-    if ((pa[i] || 0) < (pb[i] || 0)) return false
-  }
-  return false
-}
+let autoUpdater = null
+try { ({ autoUpdater } = require('electron-updater')) } catch {}
 
-async function checkForUpdate() {
-  try {
-    const res = await net.fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { 'User-Agent': 'Divo-Browser/' + app.getVersion() }
-    })
-    if (!res.ok) return
-    const rel = await res.json()
-    const latest = (rel.tag_name || '').replace(/^v/, '')
-    if (!latest || !semverGt(latest, app.getVersion())) return
-    const asset = process.platform === 'linux'  ? rel.assets?.find(a => /\.AppImage$/i.test(a.name))
-               : process.platform === 'darwin' ? rel.assets?.find(a => /\.dmg$/i.test(a.name))
-               :                                 rel.assets?.find(a => /Setup.*\.exe$/i.test(a.name))
-    // Ne notifier que si le fichier est réellement disponible en téléchargement
-    if (!asset?.browser_download_url) return
-    pendingUpdateUrl     = asset.browser_download_url
-    pendingUpdateVersion = latest
-    mainWindow?.webContents.send('update-available', { version: latest })
-  } catch (e) { console.error('checkForUpdate error', e) }
+function setupAutoUpdater() {
+  if (!autoUpdater || !app.isPackaged) return
+  autoUpdater.logger = null
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.on('update-available', info => {
+    pendingUpdateVersion = info.version
+    mainWindow?.webContents.send('update-available', { version: info.version })
+  })
+  autoUpdater.on('download-progress', p => {
+    mainWindow?.webContents.send('update-progress', Math.round(p.percent))
+  })
+  autoUpdater.on('update-downloaded', () => {
+    mainWindow?.webContents.send('update-progress', 100)
+  })
+  autoUpdater.on('error', () => {})
+  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10000)
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 60 * 60 * 1000)
 }
 
 ipcMain.handle('get-update-status', () =>
@@ -1007,150 +995,25 @@ ipcMain.handle('get-update-status', () =>
 )
 
 ipcMain.handle('check-update-now', async () => {
-  await checkForUpdate()
-  return pendingUpdateVersion ? { version: pendingUpdateVersion } : null
+  if (!autoUpdater || !app.isPackaged) return null
+  try {
+    await autoUpdater.checkForUpdates()
+    return pendingUpdateVersion ? { version: pendingUpdateVersion } : null
+  } catch { return null }
 })
 
 ipcMain.handle('install-update', async () => {
-  const url = pendingUpdateUrl
-  if (!url) return { ok: false, reason: 'no-pending-update' }
-
-  // Validation défensive de l'URL (l'origine vient du main, mais on vérifie quand même)
-  try {
-    const u = new URL(url)
-    if (u.protocol !== 'https:') return { ok: false, reason: 'bad-proto' }
-    if (!isAllowedUpdateHost(u.hostname)) return { ok: false, reason: 'bad-host' }
-    if (u.hostname === 'github.com' && !u.pathname.startsWith(`/${REPO}/releases/download/`)) {
-      return { ok: false, reason: 'bad-path' }
-    }
-  } catch { return { ok: false, reason: 'bad-url' } }
-
-  const isLinux = process.platform === 'linux'
-  const isMac   = process.platform === 'darwin'
-  const rand    = crypto.randomBytes(8).toString('hex')
-  const fileName = isLinux ? `Divo-update-${rand}.AppImage`
-                 : isMac   ? `Divo-update-${rand}.dmg`
-                 :            `Divo-Setup-update-${rand}.exe`
-  const tmpPath  = path.join(app.getPath('temp'), fileName)
-
-  // Téléchargement avec progression réelle via Node https (plus fiable que net.fetch pour les gros fichiers)
-  function downloadWithProgress(targetUrl) {
-    return new Promise((resolve, reject) => {
-      const https = require('https')
-      function doGet(u, hops) {
-        if (hops > 6) { reject(new Error('Trop de redirections')); return }
-        try {
-          const parsed = new URL(u)
-          if (parsed.protocol !== 'https:') { reject(new Error('Protocole invalide')); return }
-          if (!isAllowedUpdateHost(parsed.hostname)) { reject(new Error('Hôte non autorisé : ' + parsed.hostname)); return }
-        } catch (e) { reject(e); return }
-
-        https.get(u, { headers: { 'User-Agent': `Divo-Browser/${app.getVersion()}` } }, res => {
-          // Suivre les redirects
-          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            res.resume()
-            doGet(new URL(res.headers.location, u).href, hops + 1)
-            return
-          }
-          if (res.statusCode !== 200) { res.resume(); reject(new Error('HTTP ' + res.statusCode)); return }
-
-          const total  = parseInt(res.headers['content-length'] || '0', 10)
-          const chunks = []
-          let received = 0
-
-          res.on('data', chunk => {
-            chunks.push(chunk)
-            received += chunk.length
-            if (total > 0) {
-              const pct = 5 + Math.round((received / total) * 85)
-              mainWindow?.webContents.send('update-progress', Math.min(pct, 90))
-            }
-          })
-          res.on('end',   () => resolve(Buffer.concat(chunks)))
-          res.on('error', reject)
-        }).on('error', reject)
-      }
-      doGet(targetUrl, 0)
-    })
+  if (!autoUpdater || !app.isPackaged) {
+    shell.openExternal(`https://github.com/${REPO}/releases/latest`)
+    return { ok: false, reason: 'not-packaged' }
   }
-
   try {
     mainWindow?.webContents.send('update-progress', 5)
-    const buffer = await downloadWithProgress(url)
-    if (buffer.length < 1024) throw new Error('Fichier téléchargé trop petit')
-    mainWindow?.webContents.send('update-progress', 92)
-    fs.writeFileSync(tmpPath, buffer)   // pas de 'wx' — le nom aléatoire suffit comme garde
-    mainWindow?.webContents.send('update-progress', 100)
-
-    if (isLinux) {
-      const currentAppImage = process.env.APPIMAGE
-      // Valider que APPIMAGE est un chemin absolu vers un fichier régulier (pas un symlink)
-      if (!currentAppImage || !path.isAbsolute(currentAppImage)) {
-        shell.openExternal(`https://github.com/${REPO}/releases/latest`)
-        return { ok: false, reason: 'no-appimage-path' }
-      }
-      try {
-        if (!fs.statSync(currentAppImage).isFile()) throw new Error()
-      } catch {
-        shell.openExternal(`https://github.com/${REPO}/releases/latest`)
-        return { ok: false, reason: 'invalid-appimage-path' }
-      }
-
-      fs.chmodSync(tmpPath, 0o755)
-
-      // Nom imprédictible + flag 'wx' pour refuser de suivre un symlink pré-existant
-      // Les valeurs tmpPath/currentAppImage passent en paramètres positionnels ($1/$2)
-      // et ne sont jamais interpolées dans le corps du script → pas d'injection shell
-      const scriptPath = path.join(app.getPath('temp'), `divo-update-${crypto.randomBytes(8).toString('hex')}.sh`)
-      const logPath    = path.join(app.getPath('temp'), 'divo-update.log')
-      const script = [
-        '#!/bin/sh',
-        `LOGFILE='${logPath.replace(/'/g, "'\\''")}'`,
-        'sleep 1',
-        'cp "$1" "$2" >> "$LOGFILE" 2>&1 || { echo "cp failed" >> "$LOGFILE"; exit 1; }',
-        'chmod +x "$2" >> "$LOGFILE" 2>&1',
-        '"$2" & disown',
-      ].join('\n') + '\n'
-      fs.writeFileSync(scriptPath, script, { flag: 'wx', mode: 0o700 })
-      spawn(scriptPath, [tmpPath, currentAppImage], { detached: true, stdio: 'ignore', shell: false }).unref()
-    } else if (isMac) {
-      // macOS : monte le DMG, copie Divo.app dans /Applications, démonte, relance
-      // tmpPath passé en $1 pour éviter toute injection shell
-      const scriptPath = path.join(app.getPath('temp'), `divo-mac-upd-${rand}.sh`)
-      const script = [
-        '#!/bin/sh',
-        'MNTDIR=$(hdiutil attach "$1" -nobrowse -quiet | tail -1 | awk \'{print $NF}\')',
-        '[ -d "$MNTDIR/Divo.app" ] && cp -R "$MNTDIR/Divo.app" /Applications/ 2>/dev/null || true',
-        '[ -n "$MNTDIR" ] && hdiutil detach "$MNTDIR" -quiet 2>/dev/null || true',
-        'rm -f "$1" "$0"',
-        'sleep 1',
-        'open -a Divo',
-      ].join('\n') + '\n'
-      fs.writeFileSync(scriptPath, script, { flag: 'wx', mode: 0o700 })
-      spawn('sh', [scriptPath, tmpPath], { detached: true, stdio: 'ignore', shell: false }).unref()
-    } else {
-      // Windows : PowerShell — attend 2s que Divo se ferme, installe en silencieux (/S), relance.
-      // Fallback : ouvre l'installeur avec interface si NSIS échoue.
-      // Les chemins passent via $env: → aucune injection possible.
-      const ps = [
-        'Start-Sleep -Seconds 2',
-        '$i = Start-Process -FilePath $env:DIVO_INST -ArgumentList \'/S\' -Wait -PassThru',
-        'if ($i.ExitCode -eq 0) { Start-Sleep -Milliseconds 1500; Start-Process -FilePath $env:DIVO_EXE }',
-        'else { Start-Process -FilePath $env:DIVO_INST }',
-      ].join('; ')
-      spawn('powershell.exe', ['-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps], {
-        detached: true, stdio: 'ignore',
-        env: { ...process.env, DIVO_INST: tmpPath, DIVO_EXE: process.execPath }
-      }).unref()
-    }
-
-    // app.exit() est synchrone et ignore les handlers close/before-quit — plus fiable que app.quit()
-    // Le délai de 200ms laisse le temps à la réponse IPC d'être envoyée au renderer
-    setTimeout(() => app.exit(0), 200)
+    await autoUpdater.downloadUpdate()
+    autoUpdater.quitAndInstall(false, true)
     return { ok: true }
   } catch (e) {
-    console.error('[update] erreur :', e.message)
-    mainWindow?.webContents.send('update-progress', -1)  // signal d'erreur au renderer
+    mainWindow?.webContents.send('update-progress', -1)
     shell.openExternal(`https://github.com/${REPO}/releases/latest`)
     return { ok: false, reason: e.message }
   }
@@ -1576,8 +1439,7 @@ app.whenReady().then(async () => {
     })
   }
 
-  setTimeout(checkForUpdate, 10000)
-  setInterval(checkForUpdate, UPDATE_INTERVAL)
+  setupAutoUpdater()
 
   // Notifier le renderer si Divo n'est pas navigateur par défaut
   setTimeout(() => {
