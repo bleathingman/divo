@@ -10,6 +10,7 @@ const NEWTAB_URL = window.bridge.newtabUrl
 const SETTINGS_URL = window.bridge.settingsUrl
 
 // ── DOM
+const webview = document.getElementById('webview')
 
 // SEC-307 — fallback favicon : masque les <img> cassées sans onerror inline (bloqué par CSP)
 document.addEventListener('error', e => {
