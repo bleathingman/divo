@@ -2298,14 +2298,14 @@ updateDismissBtn.addEventListener('click', () => {
 
 // ── Navigateur par défaut
 window.bridge.onNotDefaultBrowser(() => {
-  if (!sessionStorage.getItem('default-dismissed')) defaultBrowserBar.classList.add('visible')
+  if (!localStorage.getItem('default-browser-dismissed')) defaultBrowserBar.classList.add('visible')
 })
 defaultBrowserSet.addEventListener('click', () => {
   window.bridge.setDefaultBrowser()
   defaultBrowserBar.classList.remove('visible')
 })
 defaultBrowserDismiss.addEventListener('click', () => {
-  sessionStorage.setItem('default-dismissed', '1')
+  localStorage.setItem('default-browser-dismissed', '1')
   defaultBrowserBar.classList.remove('visible')
 })
 
