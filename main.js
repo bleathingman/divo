@@ -985,6 +985,9 @@ function setupAutoUpdater() {
   if (!autoUpdater || !app.isPackaged) return
   writeLog('setupAutoUpdater: starting')
   try { autoUpdater.currentVersion } catch (e) { writeLog('autoUpdater init error: ' + e.message); return }
+  // TEST : désactivé temporairement pour diagnostiquer le crash
+  writeLog('setupAutoUpdater: DISABLED for crash diagnosis')
+  return
   autoUpdater.logger = null
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
