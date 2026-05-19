@@ -5,6 +5,9 @@ const { spawn } = require('child_process')
 const crypto = require('crypto')
 const { installChromeWebStore, installExtension, uninstallExtension } = require('electron-chrome-web-store')
 
+// Désactive l'accélération GPU pour éviter les crashs GPU silencieux
+app.disableHardwareAcceleration()
+
 // ── Crash logging
 const LOG_PATH = path.join(app.getPath('userData'), 'crash.log')
 function writeLog(msg) {
@@ -980,6 +983,8 @@ try { ({ autoUpdater } = require('electron-updater')) } catch {}
 
 function setupAutoUpdater() {
   if (!autoUpdater || !app.isPackaged) return
+  writeLog('setupAutoUpdater: starting')
+  try { autoUpdater.currentVersion } catch (e) { writeLog('autoUpdater init error: ' + e.message); return }
   autoUpdater.logger = null
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
@@ -993,8 +998,11 @@ function setupAutoUpdater() {
   autoUpdater.on('update-downloaded', () => {
     mainWindow?.webContents.send('update-progress', 100)
   })
-  autoUpdater.on('error', () => {})
-  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10000)
+  autoUpdater.on('error', (e) => writeLog('autoUpdater error: ' + (e?.message || e)))
+  setTimeout(() => {
+    writeLog('autoUpdater: checking for updates...')
+    autoUpdater.checkForUpdates().catch(e => writeLog('checkForUpdates error: ' + e?.message))
+  }, 10000)
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 60 * 60 * 1000)
 }
 
