@@ -439,6 +439,75 @@ body.private-active .nav-row .nav-btn:hover:not(:disabled) {
   width: 0
 }
 
+/* ── ESSENTIALS GRID ── */
+.essentials-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 8px 10px;
+}
+
+.ess-icon {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #2c2c2e;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s, box-shadow .15s;
+  flex-shrink: 0;
+}
+.ess-icon:hover { background: #3a3a3c; }
+.ess-icon.active {
+  background: rgba(10,132,255,.18);
+  box-shadow: 0 0 0 2px #0a84ff;
+}
+
+.ess-icon img,
+.ess-icon .ess-placeholder {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  pointer-events: none;
+  object-fit: contain;
+}
+.ess-icon .ess-placeholder {
+  background: #48484a;
+  border-radius: 6px;
+}
+
+.ess-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #636366;
+  color: #fff;
+  border: none;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  transition: background .1s;
+}
+.ess-remove:hover { background: #ff453a; }
+.ess-icon:hover .ess-remove { display: flex; }
+
+/* light theme */
+html[data-theme="light"] .ess-icon,
+body.light .ess-icon { background: #e5e5ea; }
+html[data-theme="light"] .ess-icon:hover,
+body.light .ess-icon:hover { background: #d1d1d6; }
+
 /* ── TABS ── */
 .tab-list {
   list-style: none;

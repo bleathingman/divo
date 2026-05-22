@@ -534,6 +534,9 @@ function wireWebviewEvents(el) {
       if (tab.url !== e.url) { tab.scrollY = 0; tab._resumeScroll = false }
       tab.url = e.url; saveState()
     }
+    // Persistence URL pour les essentials
+    const ess = essentials.find(x => x.id === el.__key)
+    if (ess && !isSpecial(e.url)) { ess.url = e.url; saveState() }
 
     // Initialisation settings — toujours, peu importe si actif ou non
     if (isSettings(e.url)) {
@@ -725,18 +728,24 @@ function wireWebviewEvents(el) {
       return
     }
     const tab = tabs.find(t => t.id === el.__key)
-    if (!tab || isSpecial(tab.url)) return
-    if (tab.title !== e.title) { tab.title = e.title; saveState(); renderTabs() }
+    if (tab && !isSpecial(tab.url)) {
+      if (tab.title !== e.title) { tab.title = e.title; saveState(); renderTabs() }
+    }
+    // Titre dynamique pour les essentials
+    const ess = essentials.find(x => x.id === el.__key)
+    if (ess && e.title && e.title !== ess.title) { ess.title = e.title; saveState(); renderEssentials() }
   })
 
   el.addEventListener('page-favicon-updated', e => {
     if (!e.favicons?.length) return
+    const fav = e.favicons[0]
     const tab = tabs.find(t => t.id === el.__key)
-    if (!tab || isSpecial(tab.url)) return
-    if (tab.favicon !== e.favicons[0]) {
-      tab.favicon = e.favicons[0]; saveState(); renderTabs()
+    if (tab && !isSpecial(tab.url) && tab.favicon !== fav) {
+      tab.favicon = fav; saveState(); renderTabs()
       if (el === wv()) updateTitlebarFavicon()
     }
+    const ess = essentials.find(x => x.id === el.__key)
+    if (ess && ess.favicon !== fav) { ess.favicon = fav; saveState(); renderEssentials() }
   })
 
   el.addEventListener('found-in-page', e => {
@@ -1544,15 +1553,28 @@ function startRenameInline(titleEl, obj, onDone) {
 function renderEssentials() {
   const frag = document.createDocumentFragment()
   for (const e of essentials) {
-    const li = document.createElement('li')
-    li.className = 'tab-item' + (activeEssentialId === e.id ? ' active' : '')
-    li.dataset.id = e.id; li.draggable = true
-    li.innerHTML = `
-      ${safeFavicon(e.favicon) ? `<img class="tab-favicon" src="${safeFavicon(e.favicon)}" loading="lazy" draggable="false">` : '<div class="tab-favicon-placeholder"></div>'}
-      <span class="tab-title">${escapeHtml(e.title)}</span>
-      <button class="tab-close" data-unload-ess="${e.id}">✕</button>
-    `
-    frag.appendChild(li)
+    const btn = document.createElement('button')
+    btn.className = 'ess-icon' + (activeEssentialId === e.id ? ' active' : '')
+    btn.dataset.id = e.id
+    btn.draggable = true
+    btn.title = e.title || e.url
+    const fav = safeFavicon(e.favicon)
+    if (fav) {
+      const img = document.createElement('img')
+      img.src = fav; img.loading = 'lazy'; img.draggable = false
+      btn.appendChild(img)
+    } else {
+      const ph = document.createElement('div')
+      ph.className = 'ess-placeholder'
+      btn.appendChild(ph)
+    }
+    const rm = document.createElement('button')
+    rm.className = 'ess-remove'
+    rm.dataset.unloadEss = e.id
+    rm.textContent = '✕'
+    rm.title = 'Fermer'
+    btn.appendChild(rm)
+    frag.appendChild(btn)
   }
   essentialsList.replaceChildren(frag)
 }
@@ -1902,18 +1924,18 @@ function handleShortcut(mod, shift, alt, code) {
 
 essentialsList.addEventListener('click', e => {
   const closeBtn = e.target.closest('[data-unload-ess]')
-  if (closeBtn) { unloadEssential(closeBtn.dataset.unloadEss); return }
-  const item = e.target.closest('.tab-item'); if (!item) return
+  if (closeBtn) { e.stopPropagation(); unloadEssential(closeBtn.dataset.unloadEss); return }
+  const item = e.target.closest('.ess-icon'); if (!item) return
   clearTimeout(essClickTimer)
-  essClickTimer = setTimeout(() => activateEssential(item.dataset.id), 220)
+  essClickTimer = setTimeout(() => activateEssential(item.dataset.id), 0)
 })
 essentialsList.addEventListener('dblclick', e => {
   clearTimeout(essClickTimer)
-  const item = e.target.closest('.tab-item'); if (item) startRenameEssential(item.dataset.id)
+  const item = e.target.closest('.ess-icon'); if (item) startRenameEssential(item.dataset.id)
 })
 essentialsList.addEventListener('contextmenu', e => {
   e.preventDefault()
-  const item = e.target.closest('.tab-item')
+  const item = e.target.closest('.ess-icon')
   if (item) showContextMenu(e.clientX, e.clientY, item.dataset.id, 'essential')
 })
 
@@ -2169,7 +2191,7 @@ tabsList.addEventListener('dragend', () => { clearDragStyles(); dragId = null; d
 
 essentialsList.addEventListener('dragstart', e => {
   clearTimeout(essClickTimer)
-  const item = e.target.closest('.tab-item'); if (!item) return
+  const item = e.target.closest('.ess-icon'); if (!item) return
   dragId = item.dataset.id; dragType = 'essential'
   e.dataTransfer.effectAllowed = 'move'
   requestAnimationFrame(() => item.classList.add('dragging'))
@@ -2177,14 +2199,14 @@ essentialsList.addEventListener('dragstart', e => {
 essentialsList.addEventListener('dragover', e => {
   if (dragType !== 'essential' && dragType !== 'tab') return
   e.preventDefault(); essentialsList.classList.add('drag-target')
-  applyDragOver(e.target.closest('.tab-item'), e.clientY)
+  applyDragOver(e.target.closest('.ess-icon'), e.clientY)
 })
 essentialsList.addEventListener('dragleave', e => {
   if (!essentialsList.contains(e.relatedTarget)) { essentialsList.classList.remove('drag-target'); clearDragStyles() }
 })
 essentialsList.addEventListener('drop', e => {
   e.preventDefault(); essentialsList.classList.remove('drag-target'); clearDragStyles()
-  const targetItem = e.target.closest('.tab-item')
+  const targetItem = e.target.closest('.ess-icon')
   if (dragType === 'essential') {
     if (!targetItem || !dragId || targetItem.dataset.id === dragId) return
     reorder(essentials, dragId, targetItem.dataset.id, e.clientY, targetItem); saveState(); renderEssentials()

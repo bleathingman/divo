@@ -1,6 +1,6 @@
 {
   "name": "divo",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Divo Browser",
   "author": "Divh",
   "main": "main.js",
@@ -27,8 +27,7 @@
       "repo": "divo"
     },
     "directories": {
-      "output": "dist",
-      "buildResources": "assets"
+      "output": "dist"
     },
     "files": [
       "main.js",
