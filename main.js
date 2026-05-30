@@ -654,11 +654,15 @@ const GENERIC_AD_CSS = `
 const YT_AD_CSS = `
   .ytp-ad-overlay-container, .ytp-ad-image-overlay, .ytp-ad-text-overlay,
   .ytp-ad-player-overlay, .ytp-ad-module, .ytp-ad-player-overlay-layout,
+  .ytp-ad-player-overlay-skip-or-preview, .ytp-ad-button-icon,
   ytd-action-companion-ad-renderer, ytd-ad-slot-renderer,
   ytd-promoted-sparkles-web-renderer, ytd-promoted-video-renderer,
   ytd-search-pyv-renderer, ytd-display-ad-renderer,
   ytd-promoted-sparkles-text-search-renderer, ytd-statement-banner-renderer,
   ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+  ytd-in-feed-ad-layout-renderer, ytd-banner-promo-renderer,
+  ytd-video-masthead-ad-v3-renderer, ytd-primetime-promo-renderer,
+  ytd-compact-promoted-video-renderer,
   #player-ads, #masthead-ad, .ytd-banner-promo-renderer { display: none !important; }
 `
 const YT_AD_JS = `(function(){
@@ -708,8 +712,52 @@ const YT_AD_JS = `(function(){
   });
 
   // YouTube SPA : chaque navigation vidéo déclenche cet événement
+  window.__dvSkip = skip;
   document.addEventListener('yt-navigate-finish', skip);
   skip();
+})()`
+
+// ── YouTube : injection précoce (dom-ready) — intercepte l'API player avant YouTube
+const YT_EARLY_JS = `(function(){
+  if (window.__dvE) return; window.__dvE = 1;
+
+  function cleanYT(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    var AD_KEYS = ['adPlacements','playerAds','adSlots','adBreakHeartbeatParams',
+                   'externalAdsConfig','auxiliaryUi','paidContentOverlay'];
+    for (var i = 0; i < AD_KEYS.length; i++) delete obj[AD_KEYS[i]];
+    if (obj.playerResponse) cleanYT(obj.playerResponse);
+  }
+
+  // Nettoyer ytInitialPlayerResponse déjà posé par les scripts inline du HTML
+  try {
+    var cur = window.ytInitialPlayerResponse;
+    if (cur) cleanYT(cur);
+    Object.defineProperty(window, 'ytInitialPlayerResponse', {
+      get: function() { return cur; },
+      set: function(v) { cleanYT(v); cur = v; },
+      configurable: true
+    });
+  } catch {}
+
+  // Intercepter fetch pour /youtubei/v1/player et /youtubei/v1/next
+  var _f = window.fetch;
+  window.fetch = function(input, init) {
+    var url = typeof input === 'string' ? input : (input && input.url) || '';
+    var p = _f.apply(this, arguments);
+    if (!url.includes('/youtubei/v1/player') && !url.includes('/youtubei/v1/next')) return p;
+    return p.then(function(resp) {
+      return resp.text().then(function(text) {
+        try {
+          var json = JSON.parse(text);
+          cleanYT(json);
+          var h = {};
+          resp.headers.forEach(function(v, k) { h[k] = v; });
+          return new Response(JSON.stringify(json), { status: resp.status, statusText: resp.statusText, headers: h });
+        } catch { return new Response(text, { status: resp.status }); }
+      });
+    });
+  };
 })()`
 
 // ── Twitch ad blocker
@@ -1333,6 +1381,14 @@ app.whenReady().then(async () => {
         }
       })
 
+      contents.on('dom-ready', () => {
+        if (!config.adblock) return
+        const url = contents.getURL()
+        if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+          contents.executeJavaScript(YT_EARLY_JS).catch(() => {})
+        }
+      })
+
       contents.on('did-finish-load', () => {
         const url = contents.getURL()
         if (!url || url === 'about:blank' || url.startsWith('chrome') || url.startsWith('arc') || url.startsWith('file')) return
@@ -1381,11 +1437,17 @@ app.whenReady().then(async () => {
         }
       })
 
-      // Navigation SPA : re-injecter CWS + dark mode
+      // Navigation SPA : re-injecter CWS + YouTube + dark mode
       contents.on('did-navigate-in-page', (_, url, isMainFrame) => {
         if (!isMainFrame || !url || url.startsWith('divo:')) return
         if (url.includes('chromewebstore.google.com/detail/')) {
           if (!contents.isDestroyed()) contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
+        }
+        if (config.adblock && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+          contents.insertCSS(YT_AD_CSS).catch(() => {})
+          contents.executeJavaScript(
+            'clearTimeout(window.__dvSkipT);window.__dvSkipT=setTimeout(function(){if(window.__dvSkip)window.__dvSkip();},200)'
+          ).catch(() => {})
         }
         if (!config.webDarkMode || url.startsWith('chrome-extension:')) return
         try {
