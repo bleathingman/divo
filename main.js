@@ -663,6 +663,8 @@ const YT_AD_CSS = `
   ytd-in-feed-ad-layout-renderer, ytd-banner-promo-renderer,
   ytd-video-masthead-ad-v3-renderer, ytd-primetime-promo-renderer,
   ytd-compact-promoted-video-renderer,
+  ytd-enforcement-message-view-model,
+  tp-yt-paper-dialog:has(ytd-enforcement-message-view-model),
   #player-ads, #masthead-ad, .ytd-banner-promo-renderer { display: none !important; }
 `
 const YT_AD_JS = `(function(){
@@ -727,6 +729,14 @@ const YT_EARLY_JS = `(function(){
                    'externalAdsConfig','auxiliaryUi','paidContentOverlay'];
     for (var i = 0; i < AD_KEYS.length; i++) delete obj[AD_KEYS[i]];
     if (obj.playerResponse) cleanYT(obj.playerResponse);
+    // Restaurer playabilityStatus si YouTube l'a forcé à UNPLAYABLE pour détecter un bloqueur
+    if (obj.playabilityStatus && obj.playabilityStatus.status &&
+        obj.playabilityStatus.status !== 'OK' &&
+        obj.playabilityStatus.status !== 'LIVE_STREAM_OFFLINE' &&
+        obj.playabilityStatus.status !== 'LOGIN_REQUIRED') {
+      if (!obj.playabilityStatus.reason) obj.playabilityStatus.status = 'OK';
+    }
+    if (Array.isArray(obj)) { for (var j = 0; j < obj.length; j++) cleanYT(obj[j]); }
   }
 
   // Nettoyer ytInitialPlayerResponse déjà posé par les scripts inline du HTML
@@ -747,15 +757,20 @@ const YT_EARLY_JS = `(function(){
     var p = _f.apply(this, arguments);
     if (!url.includes('/youtubei/v1/player') && !url.includes('/youtubei/v1/next')) return p;
     return p.then(function(resp) {
+      var fallback = resp.clone();
       return resp.text().then(function(text) {
         try {
           var json = JSON.parse(text);
           cleanYT(json);
           var h = {};
-          resp.headers.forEach(function(v, k) { h[k] = v; });
+          resp.headers.forEach(function(v, k) {
+            // Ne pas transférer les headers d'encodage : le body est déjà décompressé par le navigateur.
+            // Copier content-encoding ferait croire au client que le JSON brut est encore compressé → crash.
+            if (k !== 'content-encoding' && k !== 'content-length' && k !== 'transfer-encoding') h[k] = v;
+          });
           return new Response(JSON.stringify(json), { status: resp.status, statusText: resp.statusText, headers: h });
-        } catch { return new Response(text, { status: resp.status }); }
-      });
+        } catch { return fallback; }
+      }).catch(function() { return fallback; });
     });
   };
 })()`
