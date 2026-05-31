@@ -1671,9 +1671,13 @@ function buildContextMenu(type) {
     contextMenu.innerHTML = html
     return
   }
+  const essWv = pageWebviews.get(ctxTargetId)
+  const essCurrentUrl = essWv && !essWv.isDestroyed() ? essWv.getURL() : null
+  const canUpdateUrl = essCurrentUrl && !isSpecial(essCurrentUrl)
   contextMenu.innerHTML = `
     <button class="ctx-item" data-action="rename">${ICO.rename} Renommer</button>
     <button class="ctx-item" data-action="open-tab">${ICO.openTab} Ouvrir dans un onglet</button>
+    ${canUpdateUrl ? `<button class="ctx-item" data-action="update-essential-url">${ICO.url} Utiliser la page actuelle</button>` : ''}
     <div class="ctx-divider"></div>
     <button class="ctx-item danger" data-action="remove-essential">${ICO.close} Retirer des Essentials</button>
   `
@@ -2001,6 +2005,15 @@ contextMenu.addEventListener('click', e => {
     case 'unload-tab':      unloadTab(targetId); break
     case 'move-space':      moveTabToSpace(targetId, btn.dataset.targetSpace); break
     case 'open-tab':         openEssentialInTab(targetId); break
+    case 'update-essential-url': {
+      const ess = essentials.find(e => e.id === targetId)
+      const ev  = pageWebviews.get(targetId)
+      if (ess && ev && !ev.isDestroyed()) {
+        const newUrl = ev.getURL()
+        if (newUrl && !isSpecial(newUrl)) { ess.url = newUrl; saveState(); renderEssentials() }
+      }
+      break
+    }
     case 'close':            closeTab(targetId); break
     case 'remove-essential': removeEssential(targetId); break
     case 'remove-favorite':    removeFavorite(targetId); break

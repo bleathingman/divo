@@ -1492,7 +1492,10 @@ app.whenReady().then(async () => {
             }
           } catch {}
         }
-        if (mainWindow && url) mainWindow.webContents.send('open-new-tab', url)
+        if (mainWindow && url) {
+          if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false)
+          mainWindow.webContents.send('open-new-tab', url)
+        }
         return { action: 'deny' }
       })
     }
