@@ -890,6 +890,8 @@ function updateMuteBtn() {
 function updateMiniPlayer() {
   const key = mediaEssentialId || mediaTabId
   if (!key) { miniPlayer.classList.remove('visible'); return }
+  // Cacher le mini lecteur si on regarde déjà la source qui joue
+  if (key === activeEssentialId || key === activeTabId) { miniPlayer.classList.remove('visible'); return }
   const item = essentials.find(e => e.id === key) || tabs.find(t => t.id === key)
   if (!item) { miniPlayer.classList.remove('visible'); return }
   miniPlayerFav.src = safeFavicon(item.favicon)
@@ -921,7 +923,7 @@ function activateTab(id) {
   const wvEl = wv()
   if (wvEl.__ready) wvEl.setAudioMuted(t.muted || false)
   globalMuted = t.muted || false; globalPlaying = !!(t.playing)
-  updateTitlebarFavicon(); updateMuteBtn(); updatePrivateUI()
+  updateTitlebarFavicon(); updateMuteBtn(); updatePrivateUI(); updateMiniPlayer()
 }
 
 function unloadTab(id) {
@@ -1024,7 +1026,7 @@ function activateEssential(id) {
   const wvEl = wv()
   if (wvEl.__ready) wvEl.setAudioMuted(false)
   globalMuted = false; globalPlaying = false
-  updateTitlebarFavicon(); updateMuteBtn(); updatePrivateUI()
+  updateTitlebarFavicon(); updateMuteBtn(); updatePrivateUI(); updateMiniPlayer()
 }
 
 function addCurrentPageAsEssential() {
@@ -1671,8 +1673,8 @@ function buildContextMenu(type) {
     contextMenu.innerHTML = html
     return
   }
-  const essWv = pageWebviews.get(ctxTargetId)
-  const essCurrentUrl = essWv && !essWv.isDestroyed() ? essWv.getURL() : null
+  let essCurrentUrl = null
+  try { const essWv = pageWebviews.get(ctxTargetId); if (essWv) essCurrentUrl = essWv.getURL() } catch {}
   const canUpdateUrl = essCurrentUrl && !isSpecial(essCurrentUrl)
   contextMenu.innerHTML = `
     <button class="ctx-item" data-action="rename">${ICO.rename} Renommer</button>
