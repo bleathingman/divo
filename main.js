@@ -655,6 +655,8 @@ const YT_AD_CSS = `
   .ytp-ad-overlay-container, .ytp-ad-image-overlay, .ytp-ad-text-overlay,
   .ytp-ad-player-overlay, .ytp-ad-module, .ytp-ad-player-overlay-layout,
   .ytp-ad-player-overlay-skip-or-preview, .ytp-ad-button-icon,
+  .ytp-ad-action-interstitial, .ytp-ad-action-interstitial-slot,
+  .ytp-suggested-action-badge, .ytp-suggested-action-badge-expanded,
   ytd-action-companion-ad-renderer, ytd-ad-slot-renderer,
   ytd-promoted-sparkles-web-renderer, ytd-promoted-video-renderer,
   ytd-search-pyv-renderer, ytd-display-ad-renderer,
@@ -662,26 +664,42 @@ const YT_AD_CSS = `
   ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
   ytd-in-feed-ad-layout-renderer, ytd-banner-promo-renderer,
   ytd-video-masthead-ad-v3-renderer, ytd-primetime-promo-renderer,
-  ytd-compact-promoted-video-renderer,
+  ytd-compact-promoted-video-renderer, ytd-mealbar-promo-renderer,
   ytd-enforcement-message-view-model,
   tp-yt-paper-dialog:has(ytd-enforcement-message-view-model),
   #player-ads, #masthead-ad, .ytd-banner-promo-renderer { display: none !important; }
 `
 const YT_AD_JS = `(function(){
   if (window.__dv) return; window.__dv = 1;
+
+  function dismissEnforcement() {
+    var btns = document.querySelectorAll(
+      'ytd-enforcement-message-view-model button, ' +
+      'tp-yt-paper-dialog ytd-button-renderer button, ' +
+      'ytd-mealbar-promo-renderer #dismiss-button button, ' +
+      'ytd-mealbar-promo-renderer button[aria-label]'
+    );
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].offsetParent !== null) { btns[i].click(); return true; }
+    }
+    return false;
+  }
+
   function skip() {
+    if (dismissEnforcement()) return;
+
     // Bouton "Passer l'annonce" — sélecteurs 2024/2025
-    const btn = document.querySelector(
+    var btn = document.querySelector(
       '.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, ' +
       '.ytp-ad-skip-button-slot button, button[class*="skip"]'
     );
     if (btn) { btn.click(); return; }
 
-    const vid = document.querySelector('video');
+    var vid = document.querySelector('video');
     if (!vid) return;
 
     // Détection via .ad-showing sur <html> (la plus fiable, stable depuis 2020)
-    const isAd =
+    var isAd =
       document.documentElement.classList.contains('ad-showing') ||
       document.documentElement.classList.contains('ad-interrupting') ||
       !!document.querySelector(
@@ -690,7 +708,6 @@ const YT_AD_JS = `(function(){
       );
 
     if (isAd) {
-      // Sauvegarder la vitesse et le mute de l'utilisateur avant d'intervenir
       if (vid.playbackRate !== 16) {
         if (window.__dvRate === undefined) window.__dvRate = vid.playbackRate;
         vid.playbackRate = 16;
@@ -699,7 +716,6 @@ const YT_AD_JS = `(function(){
       if (isFinite(vid.duration) && vid.duration > 0)
         vid.currentTime = vid.duration - 0.01;
     } else if (window.__dvRate !== undefined) {
-      // Restaurer la vitesse choisie par l'utilisateur (pas forcer 1x)
       vid.playbackRate = window.__dvRate;
       window.__dvRate = undefined;
       if (!window.__dvWasMuted) vid.muted = false;
@@ -713,6 +729,9 @@ const YT_AD_JS = `(function(){
     attributes: true, attributeFilter: ['class']
   });
 
+  // Polling de sécurité : MutationObserver peut manquer certains états transitoires
+  setInterval(skip, 100);
+
   // YouTube SPA : chaque navigation vidéo déclenche cet événement
   window.__dvSkip = skip;
   document.addEventListener('yt-navigate-finish', skip);
@@ -723,29 +742,37 @@ const YT_AD_JS = `(function(){
 const YT_EARLY_JS = `(function(){
   if (window.__dvE) return; window.__dvE = 1;
 
-  function cleanYT(obj) {
-    if (!obj || typeof obj !== 'object') return;
-    var AD_KEYS = ['adPlacements','playerAds','adSlots','adBreakHeartbeatParams',
-                   'externalAdsConfig','auxiliaryUi','paidContentOverlay'];
+  var AD_KEYS = ['adPlacements','playerAds','adSlots','adBreakHeartbeatParams',
+                 'externalAdsConfig','auxiliaryUi','paidContentOverlay',
+                 'adCpns','adMetadata'];
+
+  function cleanYT(obj, d) {
+    if (!obj || typeof obj !== 'object' || d > 8) return;
+    if (Array.isArray(obj)) {
+      for (var i = 0; i < obj.length; i++) cleanYT(obj[i], d + 1);
+      return;
+    }
     for (var i = 0; i < AD_KEYS.length; i++) delete obj[AD_KEYS[i]];
-    if (obj.playerResponse) cleanYT(obj.playerResponse);
-    // Restaurer playabilityStatus si YouTube l'a forcé à UNPLAYABLE pour détecter un bloqueur
     if (obj.playabilityStatus && obj.playabilityStatus.status &&
         obj.playabilityStatus.status !== 'OK' &&
         obj.playabilityStatus.status !== 'LIVE_STREAM_OFFLINE' &&
         obj.playabilityStatus.status !== 'LOGIN_REQUIRED') {
       if (!obj.playabilityStatus.reason) obj.playabilityStatus.status = 'OK';
     }
-    if (Array.isArray(obj)) { for (var j = 0; j < obj.length; j++) cleanYT(obj[j]); }
+    for (var k in obj) {
+      if (obj.hasOwnProperty(k) && obj[k] && typeof obj[k] === 'object') {
+        cleanYT(obj[k], d + 1);
+      }
+    }
   }
 
   // Nettoyer ytInitialPlayerResponse déjà posé par les scripts inline du HTML
   try {
     var cur = window.ytInitialPlayerResponse;
-    if (cur) cleanYT(cur);
+    if (cur) cleanYT(cur, 0);
     Object.defineProperty(window, 'ytInitialPlayerResponse', {
       get: function() { return cur; },
-      set: function(v) { cleanYT(v); cur = v; },
+      set: function(v) { cleanYT(v, 0); cur = v; },
       configurable: true
     });
   } catch {}
@@ -761,11 +788,9 @@ const YT_EARLY_JS = `(function(){
       return resp.text().then(function(text) {
         try {
           var json = JSON.parse(text);
-          cleanYT(json);
+          cleanYT(json, 0);
           var h = {};
           resp.headers.forEach(function(v, k) {
-            // Ne pas transférer les headers d'encodage : le body est déjà décompressé par le navigateur.
-            // Copier content-encoding ferait croire au client que le JSON brut est encore compressé → crash.
             if (k !== 'content-encoding' && k !== 'content-length' && k !== 'transfer-encoding') h[k] = v;
           });
           return new Response(JSON.stringify(json), { status: resp.status, statusText: resp.statusText, headers: h });
