@@ -1245,6 +1245,8 @@ function createWindow() {
     // Figer toutes les webPreferences (écrase tout attribut webpreferences="...")
     delete webPreferences.preload
     delete webPreferences.preloadURL
+    // Preload de confiance : injection anticipée du patch YouTube (avant les scripts de la page)
+    webPreferences.preload = path.join(__dirname, 'renderer', 'page-preload.js')
     webPreferences.nodeIntegration             = false
     webPreferences.nodeIntegrationInSubFrames  = false
     webPreferences.contextIsolation            = true
