@@ -951,6 +951,38 @@ function unloadTab(id) {
   }
 }
 
+// ── Auto-suspend : unload les onglets inactifs depuis AUTO_SUSPEND_MS (comme Arc Smart Tabs)
+const AUTO_SUSPEND_MS = 30 * 60 * 1000  // 30 minutes
+
+function autoSuspendCheck() {
+  const now = Date.now()
+  const candidates = tabs.filter(t =>
+    t.id !== activeTabId &&
+    !t.private &&
+    !t.unloaded &&
+    !t.playing &&
+    !isSpecial(t.url) &&
+    pageWebviews.has(t.id) &&
+    (now - (t.lastUsed || 0)) >= AUTO_SUSPEND_MS
+  )
+  if (!candidates.length) return
+  let remaining = candidates.length
+  for (const tab of candidates) {
+    const wvEl = pageWebviews.get(tab.id)
+    const finish = (y) => {
+      if (typeof y === 'number' && y >= 0) tab.scrollY = y
+      tab.unloaded = true
+      if (wvEl) { try { wvEl.src = 'about:blank' } catch {} wvEl.remove(); pageWebviews.delete(tab.id) }
+      if (--remaining === 0) { saveState(); renderTabs() }
+    }
+    if (wvEl?.__ready) {
+      wvEl.executeJavaScript('window.scrollY').then(finish).catch(() => finish(0))
+    } else {
+      finish(0)
+    }
+  }
+}
+
 function startScrollSaver() {
   setInterval(() => {
     const wvEl = wv()
@@ -1582,6 +1614,12 @@ function renderEssentials() {
 }
 
 function buildTabItem(t) {
+  if (t.__separator) {
+    const li = document.createElement('li')
+    li.className = 'tab-sleep-separator'
+    li.innerHTML = `<span class="tab-sleep-label">En veille · ${t.count}</span>`
+    return li
+  }
   const li = document.createElement('li')
   li.className = 'tab-item'
     + (activeTabId === t.id && !activeEssentialId ? ' active' : '')
@@ -1603,7 +1641,13 @@ function buildTabItem(t) {
 }
 
 function renderTabs() {
-  tabsVL.update(getActiveTabs(), buildTabItem)
+  const all = getActiveTabs()
+  const loaded   = all.filter(t => !t.unloaded)
+  const sleeping = all.filter(t =>  t.unloaded)
+  const items = sleeping.length
+    ? [...loaded, { __separator: true, count: sleeping.length }, ...sleeping]
+    : loaded
+  tabsVL.update(items, buildTabItem)
   renderTopTabs()
 }
 
@@ -2278,6 +2322,7 @@ window.bridge.onFullscreenChange(isFS => document.body.classList.toggle('fullscr
 window.bridge.onOpenNewTab(url => { if (url) createTab(url) })
 
 loadState(); loadHistory(); render(); startArchiveTimer(); startScrollSaver()
+setInterval(autoSuspendCheck, 5 * 60 * 1000)
 
 const activeItem = activeEssentialId
   ? essentials.find(e => e.id === activeEssentialId)

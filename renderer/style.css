@@ -297,6 +297,30 @@ body.private-active .nav-row .nav-btn:hover:not(:disabled) {
   opacity: 1
 }
 
+/* ── SMART TABS — séparateur "En veille" ── */
+.tab-sleep-separator {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 6px;
+  pointer-events: none;
+}
+.tab-sleep-separator::before,
+.tab-sleep-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #2c2c2e;
+}
+.tab-sleep-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #48484a;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
 /* ── UNLOADED ── */
 .tab-item.unloaded {
   opacity: .45
@@ -1512,6 +1536,9 @@ body.light .tab-item.active { background: rgba(10,132,255,.11); color: #006edc }
 body.light .tab-close { color: #c7c7cc }
 body.light .tab-close:hover { color: #636366; background: rgba(0,0,0,.07) }
 body.light .tab-item.unloaded { opacity: .45 }
+body.light .tab-sleep-separator::before,
+body.light .tab-sleep-separator::after { background: #e5e5ea }
+body.light .tab-sleep-label { color: #aeaeb2 }
 
 body.light .divider { background: #d1d1d6 }
 
