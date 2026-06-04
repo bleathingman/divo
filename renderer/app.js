@@ -622,7 +622,7 @@ function wireWebviewEvents(el) {
         const wdm = await window.bridge.webDarkModeStatus()
         const hu  = await window.bridge.httpsUpgradeStatus()
         const isDefault = await window.bridge.isDefaultBrowser()
-        el.executeJavaScript(`
+        el.executeJavaScript(`(function(){
           document.getElementById('search-engine').value    = ${JSON.stringify(se)};
           document.getElementById('homepage').value         = ${JSON.stringify(hp)};
           document.getElementById('save-session').value     = ${JSON.stringify(ss)};
@@ -658,7 +658,7 @@ function wireWebviewEvents(el) {
               _uBtn.dataset.state = 'idle';
             }
           }
-        `).catch(() => {})
+        })()`).catch(() => {})
       }, 300)
     }
 
@@ -764,10 +764,10 @@ function wireWebviewEvents(el) {
       return
     }
     if (e.title.startsWith('divo-settings-action:check-update') && isSettings(currentUrl)) {
-      el.executeJavaScript(`
+      el.executeJavaScript(`(function(){
         const b = document.getElementById('update-action-btn');
         if (b) { b.textContent = 'Vérification…'; b.disabled = true; }
-      `).catch(() => {})
+      })()`).catch(() => {})
       window.bridge.checkUpdateNow().then(upd => {
         if (upd) {
           pendingUpdate = upd
@@ -776,12 +776,12 @@ function wireWebviewEvents(el) {
         const vTxt  = upd ? `v${upd.version} disponible` : 'Divo est à jour'
         const bTxt  = upd ? `Installer v${upd.version}`  : 'Vérifier'
         const state = upd ? 'available' : 'idle'
-        el.executeJavaScript(`
+        el.executeJavaScript(`(function(){
           const b = document.getElementById('update-action-btn');
           const t = document.getElementById('update-status-text');
           if (b) { b.textContent = ${JSON.stringify(bTxt)}; b.dataset.state = ${JSON.stringify(state)}; b.disabled = false; }
           if (t) t.textContent = ${JSON.stringify(vTxt)};
-        `).catch(() => {})
+        })()`).catch(() => {})
       })
       return
     }
