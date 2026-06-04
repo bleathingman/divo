@@ -65,6 +65,9 @@
     <button class="nav-btn" id="top-btn-reload" title="Recharger">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
     </button>
+    <button class="nav-btn reader-btn" id="top-btn-reader" title="Mode lecture (F9)" style="display:none">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+    </button>
   </div>
 
   <!-- Top layout : tab bar -->
@@ -101,6 +104,9 @@
         </button>
         <button class="nav-btn" id="btn-reload" title="Recharger">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+        </button>
+        <button class="nav-btn reader-btn" id="btn-reader" title="Mode lecture (F9)" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
         </button>
       </div>
 
@@ -266,6 +272,26 @@
           <button id="sessions-cancel-btn">Annuler</button>
         </div>
         <div class="sessions-list" id="sessions-list"></div>
+      </div>
+
+      <!-- Mode Reader -->
+      <div class="reader-overlay" id="reader-overlay">
+        <div class="reader-toolbar">
+          <span class="reader-site" id="reader-site"></span>
+          <div class="reader-controls">
+            <button class="reader-font-btn" id="reader-font-minus" title="Réduire">A−</button>
+            <button class="reader-font-btn" id="reader-font-plus" title="Agrandir">A+</button>
+            <button class="reader-close" id="reader-close">✕</button>
+          </div>
+        </div>
+        <div class="reader-body">
+          <div class="reader-article">
+            <h1 class="reader-title" id="reader-title"></h1>
+            <div class="reader-byline" id="reader-byline"></div>
+            <div class="reader-date" id="reader-date"></div>
+            <div class="reader-content" id="reader-content"></div>
+          </div>
+        </div>
       </div>
 
       <div class="dl-bar" id="dl-bar">

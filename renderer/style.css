@@ -1005,6 +1005,134 @@ body.light .default-browser-bar { background: #e8f0fe; border-bottom-color: #4a9
   color: #f5f5f7
 }
 
+/* ── MODE READER ── */
+.reader-btn { opacity: .55 }
+.reader-btn:hover { opacity: 1 }
+.reader-btn.active { color: #0a84ff; opacity: 1 }
+
+.reader-overlay {
+  position: absolute;
+  inset: 0;
+  background: #141416;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s;
+}
+.reader-overlay.visible { opacity: 1; pointer-events: all }
+
+.reader-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid #2a2a2c;
+  flex-shrink: 0;
+  gap: 12px;
+}
+.reader-site {
+  font-size: 12px;
+  color: #48484a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reader-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0 }
+.reader-font-btn {
+  background: #2c2c2e;
+  border: none;
+  border-radius: 6px;
+  color: #aeaeb2;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  line-height: 1;
+}
+.reader-font-btn:hover { background: #3a3a3c; color: #f5f5f7 }
+.reader-close {
+  background: none;
+  border: none;
+  color: #48484a;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 6px;
+  line-height: 1;
+}
+.reader-close:hover { color: #f5f5f7; background: #2c2c2e }
+
+.reader-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 48px 24px 80px;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3c transparent;
+}
+.reader-article { max-width: 680px; width: 100% }
+
+.reader-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #f5f5f7;
+  line-height: 1.3;
+  margin: 0 0 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.reader-byline { font-size: 14px; color: #636366; margin-bottom: 4px }
+.reader-date   { font-size: 12px; color: #3a3a3c; margin-bottom: 36px }
+
+.reader-content {
+  font-size: 18px;
+  line-height: 1.75;
+  color: #c7c7cc;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+.reader-content p  { margin: 0 0 1.2em }
+.reader-content h1 { display: none }
+.reader-content h2 { font-size: 21px; font-weight: 700; color: #f5f5f7; margin: 1.8em 0 .5em; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.3 }
+.reader-content h3 { font-size: 17px; font-weight: 600; color: #e5e5ea; margin: 1.4em 0 .4em; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif }
+.reader-content h4 { font-size: 15px; font-weight: 600; color: #aeaeb2; margin: 1.2em 0 .3em; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif }
+.reader-content img { max-width: 100%; height: auto; border-radius: 8px; display: block; margin: 1.2em auto }
+.reader-content figure { margin: 1.5em 0 }
+.reader-content figcaption { font-size: 13px; color: #636366; margin-top: 6px; font-family: -apple-system; font-style: italic; text-align: center }
+.reader-content a { color: #0a84ff; text-decoration: none }
+.reader-content a:hover { text-decoration: underline }
+.reader-content blockquote { border-left: 3px solid #3a3a3c; padding-left: 20px; margin: 1.5em 0; color: #8e8e93; font-style: italic }
+.reader-content ul, .reader-content ol { padding-left: 24px; margin: 0 0 1em }
+.reader-content li { margin-bottom: .4em }
+.reader-content pre { background: #1c1c1e; border-radius: 8px; padding: 16px; overflow-x: auto; margin: 1em 0 }
+.reader-content code { background: #1c1c1e; border-radius: 4px; padding: 2px 6px; font-size: 15px; font-family: 'SF Mono', Consolas, monospace; color: #ff9f0a }
+.reader-content pre code { background: none; padding: 0; color: #c7c7cc }
+.reader-content hr { border: none; border-top: 1px solid #2c2c2e; margin: 2em 0 }
+.reader-content table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 15px }
+.reader-content th, .reader-content td { padding: 8px 12px; border-bottom: 1px solid #2c2c2e; text-align: left }
+.reader-content th { color: #aeaeb2; font-weight: 600 }
+
+/* Light theme */
+body.light .reader-overlay { background: #f9f9f9 }
+body.light .reader-toolbar { border-bottom-color: #e5e5ea }
+body.light .reader-site { color: #aeaeb2 }
+body.light .reader-title { color: #1c1c1e }
+body.light .reader-byline { color: #8e8e93 }
+body.light .reader-date { color: #aeaeb2 }
+body.light .reader-content { color: #3a3a3c }
+body.light .reader-content h2, body.light .reader-content h3, body.light .reader-content h4 { color: #1c1c1e }
+body.light .reader-content a { color: #007aff }
+body.light .reader-content blockquote { border-left-color: #d1d1d6; color: #8e8e93 }
+body.light .reader-content pre, body.light .reader-content code { background: #f2f2f7 }
+body.light .reader-content pre code { background: none; color: #3a3a3c }
+body.light .reader-content code { color: #c0392b }
+body.light .reader-content hr, body.light .reader-content td, body.light .reader-content th { border-color: #e5e5ea }
+body.light .reader-font-btn { background: #e5e5ea; color: #3a3a3c }
+body.light .reader-font-btn:hover { background: #d1d1d6; color: #1c1c1e }
+body.light .reader-close { color: #aeaeb2 }
+body.light .reader-close:hover { background: #e5e5ea; color: #1c1c1e }
+
 /* ── SESSIONS ── */
 .sessions-panel {
   position: absolute;

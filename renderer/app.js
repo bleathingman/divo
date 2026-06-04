@@ -69,6 +69,9 @@ const topTabsList   = document.getElementById('top-tabs-list')
 const permBar       = document.getElementById('permission-bar')
 const permText      = document.getElementById('perm-text')
 const appName       = document.getElementById('app-name')
+const btnReader     = document.getElementById('btn-reader')
+const topBtnReader  = document.getElementById('top-btn-reader')
+const readerOverlay = document.getElementById('reader-overlay')
 
 // ── Icônes
 const ICON_RELOAD = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`
@@ -76,6 +79,55 @@ const ICON_STOP   = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
 const ICON_AUDIO  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`
 const ICON_MUTED  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`
 const ICON_LOCK   = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`
+
+// Script injecté dans le webview pour extraire le contenu article
+const READER_EXTRACT_JS = `(function() {
+  function score(el) {
+    let s = 0
+    const tag = el.tagName?.toLowerCase()
+    if (tag === 'article') s += 30
+    if (tag === 'main') s += 15
+    const role = el.getAttribute?.('role') || ''
+    if (role === 'main' || role === 'article') s += 20
+    const cls = ((el.className || '') + ' ' + (el.id || '')).toLowerCase()
+    const good = ['article','post-body','post-content','content-body','entry-content','story','article-body','article-content','article__body']
+    const bad  = ['sidebar','comment','footer','header','nav','advertisement','share','related','widget','menu','social','promo']
+    for (const w of good) if (cls.includes(w)) s += 8
+    for (const w of bad)  if (cls.includes(w)) s -= 15
+    let chars = 0
+    el.querySelectorAll('p').forEach(p => { chars += p.textContent.length })
+    s += Math.min(40, chars / 80)
+    return s
+  }
+  const sel = 'article,main,[role="main"],[role="article"],.article-body,.article-content,.post-content,.entry-content,.story-body,.content-body,#article-body,#content,#main-content,.main-content,.post-body,.article__body'
+  const candidates = [...document.querySelectorAll(sel)]
+  let best = null, bestScore = -Infinity
+  for (const el of candidates) {
+    if (el.offsetWidth === 0 || el.offsetHeight === 0) continue
+    const s = score(el)
+    if (s > bestScore) { bestScore = s; best = el }
+  }
+  if (!best || bestScore < 5) return null
+  const clone = best.cloneNode(true)
+  const noise = 'script,style,nav,header,footer,aside,noscript,iframe,button,form,[class*="ad-"],[class*="-ad"],[class*="ads "],[id*="sidebar"],[class*="sidebar"],[class*="share"],[class*="social"],[class*="related"],[class*="comment"],[class*="newsletter"],[class*="popup"],[class*="modal"],[class*="sticky"],[class*="banner"],[class*="promo"],[role="complementary"],[role="navigation"],[role="banner"],[role="contentinfo"]'
+  try { clone.querySelectorAll(noise).forEach(e => e.remove()) } catch {}
+  clone.querySelectorAll('p,div').forEach(el => { if (!el.textContent.trim() && !el.querySelector('img')) el.remove() })
+  clone.querySelectorAll('img').forEach(img => {
+    const src = img.getAttribute('src') || ''
+    if (!src || src.startsWith('data:image/gif') || img.width < 50) { img.remove(); return }
+    img.style.cssText = 'max-width:100%;height:auto;border-radius:8px;margin:12px 0'
+    img.removeAttribute('srcset'); img.removeAttribute('sizes')
+    img.removeAttribute('width'); img.removeAttribute('height')
+  })
+  clone.querySelectorAll('[style]').forEach(el => el.removeAttribute('style'))
+  clone.querySelectorAll('[class]').forEach(el => el.removeAttribute('class'))
+  clone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'))
+  const title = document.querySelector('h1')?.textContent?.trim() || document.querySelector('meta[property="og:title"]')?.content || document.title || ''
+  const byline = document.querySelector('[rel="author"],[itemprop="author"],[class*="author-name"],[class*="byline"]')?.textContent?.trim() || ''
+  const date = document.querySelector('time[datetime],[class*="publish-date"],[class*="article-date"],[itemprop="datePublished"]')?.textContent?.trim() || ''
+  const siteName = document.querySelector('meta[property="og:site_name"]')?.content || location.hostname.replace(/^www\\./, '')
+  return { title, byline, date, siteName, content: clone.innerHTML }
+})()`
 
 const ICO = {
   rename:   `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`,
@@ -208,6 +260,8 @@ let resizeStartX    = 0
 let resizeStartW    = 0
 let globalMuted     = false
 let globalPlaying   = false
+let readerActive    = false
+let readerFontSize  = 18
 let mediaTabId        = null   // onglet qui joue actuellement
 let mediaEssentialId  = null   // essential qui joue actuellement
 let pendingPermKey  = null
@@ -482,6 +536,7 @@ function wireWebviewEvents(el) {
   el.addEventListener('did-start-loading', () => {
     if (el !== wv()) return
     isLoading = true; btnReload.innerHTML = ICON_STOP; btnReload.title = 'Arrêter'; startProgress()
+    closeReader()
   })
 
   el.addEventListener('did-stop-loading', () => {
@@ -864,6 +919,7 @@ function updateNavButtons() {
   const canFwd  = wv().canGoForward()
   btnBack.disabled    = !canBack;  topBtnBack.disabled    = !canBack
   btnForward.disabled = !canFwd;   topBtnForward.disabled = !canFwd
+  updateReaderBtn()
 }
 
 function updateTitlebarFavicon() {
@@ -887,6 +943,56 @@ function updateMuteBtn() {
     btnMute.innerHTML = ICON_AUDIO; btnMute.style.color = ''
     btnMute.style.opacity = '0'; btnMute.title = 'Couper le son'
   }
+}
+
+// ── Mode Reader
+function updateReaderBtn() {
+  const el = wv()
+  const url = el?.getURL() || ''
+  const show = webviewReady && !isSpecial(url) && !isLoading
+  btnReader.style.display    = show ? '' : 'none'
+  topBtnReader.style.display = show ? '' : 'none'
+  btnReader.classList.toggle('active', readerActive)
+  topBtnReader.classList.toggle('active', readerActive)
+}
+
+async function activateReader() {
+  const el = wv()
+  if (!el?.__ready) return
+  let article = null
+  try { article = await el.executeJavaScript(READER_EXTRACT_JS) } catch {}
+  if (!article) return
+  document.getElementById('reader-title').textContent   = article.title   || ''
+  document.getElementById('reader-byline').textContent  = article.byline  || ''
+  document.getElementById('reader-date').textContent    = article.date    || ''
+  document.getElementById('reader-site').textContent    = article.siteName || ''
+  const contentEl = document.getElementById('reader-content')
+  contentEl.innerHTML = article.content
+  contentEl.style.fontSize = readerFontSize + 'px'
+  // Ouvrir les liens dans le vrai navigateur
+  contentEl.querySelectorAll('a[href]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault()
+      const href = a.getAttribute('href')
+      if (href && !href.startsWith('#')) navigate(href)
+      closeReader()
+    })
+  })
+  readerActive = true
+  readerOverlay.classList.add('visible')
+  updateReaderBtn()
+}
+
+function closeReader() {
+  if (!readerActive) return
+  readerActive = false
+  readerOverlay.classList.remove('visible')
+  updateReaderBtn()
+}
+
+function toggleReader() {
+  if (readerActive) closeReader()
+  else activateReader()
 }
 
 function updateMiniPlayer() {
@@ -2068,6 +2174,7 @@ function handleShortcut(mod, shift, alt, code) {
   if (code === 'F3')  { openFind(); return true }
   if (code === 'F5')  { if (webviewReady) wv().reload(); return true }
   if (code === 'F8')  { toggleFocusMode(); return true }
+  if (code === 'F9')  { toggleReader(); return true }
   if (code === 'F11') { window.bridge.toggleFullscreen(); return true }
   if (code === 'F12') { if (webviewReady) wv().openDevTools(); return true }
   if (mod && shift && code === 'KeyI') { if (webviewReady) wv().openDevTools(); return true }
@@ -2078,6 +2185,7 @@ function handleShortcut(mod, shift, alt, code) {
   if (mod && (code === 'Digit0' || code === 'Numpad0'))        { zoomReset(); return true }
   if (code === 'Escape') {
     if (document.getElementById('cmd-overlay')?.style.display === 'flex') { closePalette(); return true }
+    if (readerActive) { closeReader(); return true }
     if (permBar.classList.contains('visible'))    { permBar.classList.remove('visible'); return true }
     if (findBar.classList.contains('visible'))    { closeFind();   return true }
     if (historyPanel.classList.contains('visible')) { closeHistory(); return true }
@@ -2299,6 +2407,17 @@ topBtnBack.addEventListener('click',    () => { if (webviewReady && wv().canGoBa
 topBtnForward.addEventListener('click', () => { if (webviewReady && wv().canGoForward()) wv().goForward() })
 topBtnReload.addEventListener('click',  () => { if (!webviewReady) return; isLoading ? wv().stop() : wv().reload() })
 topBtnMute.addEventListener('click',    () => btnMute.click())
+btnReader.addEventListener('click',    toggleReader)
+topBtnReader.addEventListener('click', toggleReader)
+document.getElementById('reader-close').addEventListener('click', closeReader)
+document.getElementById('reader-font-minus').addEventListener('click', () => {
+  readerFontSize = Math.max(13, readerFontSize - 1)
+  document.getElementById('reader-content').style.fontSize = readerFontSize + 'px'
+})
+document.getElementById('reader-font-plus').addEventListener('click', () => {
+  readerFontSize = Math.min(26, readerFontSize + 1)
+  document.getElementById('reader-content').style.fontSize = readerFontSize + 'px'
+})
 
 // Boutons souris supplémentaires (retour = 3, avant = 4)
 window.addEventListener('mouseup', e => {
