@@ -55,6 +55,7 @@ const findBar       = document.getElementById('find-bar')
 const findInput     = document.getElementById('find-input')
 const findCount     = document.getElementById('find-count')
 const historyPanel  = document.getElementById('history-panel')
+const sessionsPanel = document.getElementById('sessions-panel')
 const dlBar         = document.getElementById('dl-bar')
 const dlList        = document.getElementById('dl-list')
 const tabsSection   = document.querySelector('.tabs-section')
@@ -196,6 +197,7 @@ let ctxType         = null
 let zoomLevel       = 1.0
 let progressTimer   = null
 let historyData     = []
+let sessionsData    = []
 let sidebarVisible  = true
 let focusMode       = false
 let downloads       = new Map()
@@ -1817,6 +1819,112 @@ function toggleHistory() { historyPanel.classList.contains('visible') ? closeHis
 
 
 // ============================================================
+// SESSIONS NOMMÉES
+// ============================================================
+
+function loadSessions() {
+  try {
+    const s = window.bridge.initSessions
+    sessionsData = Array.isArray(s) ? s : []
+  } catch { sessionsData = [] }
+}
+
+function saveSessions() {
+  window.bridge.sessionsSave(sessionsData).catch(() => {})
+}
+
+function saveCurrentSession(name) {
+  const tabList = getActiveTabs().filter(t => !t.private && !isSpecial(t.url))
+  if (!tabList.length) return
+  const session = {
+    id: 's' + Date.now(),
+    name: name || `Session — ${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
+    savedAt: Date.now(),
+    tabs: tabList.map(t => ({ url: t.url, title: t.title, favicon: t.favicon || null }))
+  }
+  sessionsData.unshift(session)
+  saveSessions()
+  renderSessions()
+}
+
+function restoreSession(id) {
+  const session = sessionsData.find(s => s.id === id)
+  if (!session) return
+  for (const t of session.tabs) createTab(t.url)
+  closeSessions()
+}
+
+function deleteSession(id) {
+  sessionsData = sessionsData.filter(s => s.id !== id)
+  saveSessions()
+  renderSessions()
+}
+
+function renameSession(id, name) {
+  const session = sessionsData.find(s => s.id === id)
+  if (!session || !name.trim()) return
+  session.name = name.trim()
+  saveSessions()
+}
+
+function renderSessions() {
+  const list = document.getElementById('sessions-list')
+  if (!sessionsData.length) {
+    list.innerHTML = '<div class="sessions-empty">Aucune session sauvegardée</div>'
+    return
+  }
+  const frag = document.createDocumentFragment()
+  for (const session of sessionsData) {
+    const el = document.createElement('div')
+    el.className = 'session-item'
+    el.innerHTML = `
+      <div class="session-item-main">
+        <div class="session-name" data-id="${session.id}" contenteditable="true" spellcheck="false">${escapeHtml(session.name)}</div>
+        <div class="session-meta">${session.tabs.length} onglet${session.tabs.length > 1 ? 's' : ''} · ${new Date(session.savedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</div>
+      </div>
+      <div class="session-actions">
+        <button class="session-btn session-restore" data-id="${session.id}" title="Ouvrir les onglets">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="5 12 12 5 19 12"/><polyline points="5 19 12 12 19 19"/></svg>
+        </button>
+        <button class="session-btn session-delete" data-id="${session.id}" title="Supprimer">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    `
+    const nameEl = el.querySelector('.session-name')
+    nameEl.addEventListener('blur', () => renameSession(session.id, nameEl.textContent))
+    nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); nameEl.blur() } })
+    el.querySelector('.session-restore').addEventListener('click', () => restoreSession(session.id))
+    el.querySelector('.session-delete').addEventListener('click', () => deleteSession(session.id))
+    // Afficher les URLs au survol
+    el.addEventListener('mouseenter', () => {
+      const preview = el.querySelector('.session-preview') || (() => {
+        const p = document.createElement('div'); p.className = 'session-preview'
+        p.innerHTML = session.tabs.slice(0, 5).map(t =>
+          `<div class="session-preview-item">${safeFavicon(t.favicon) ? `<img src="${safeFavicon(t.favicon)}">` : '<span style="width:12px;display:inline-block"></span>'} ${escapeHtml(t.title || t.url)}</div>`
+        ).join('') + (session.tabs.length > 5 ? `<div class="session-preview-more">+${session.tabs.length - 5} autres</div>` : '')
+        el.appendChild(p); return p
+      })()
+      preview.style.display = 'block'
+    })
+    el.addEventListener('mouseleave', () => {
+      const p = el.querySelector('.session-preview'); if (p) p.style.display = 'none'
+    })
+    frag.appendChild(el)
+  }
+  list.replaceChildren(frag)
+}
+
+function openSessions() {
+  renderSessions()
+  sessionsPanel.classList.add('visible')
+  document.getElementById('sessions-save-form').style.display = 'none'
+}
+function closeSessions()  { sessionsPanel.classList.remove('visible') }
+function toggleSessions() { sessionsPanel.classList.contains('visible') ? closeSessions() : openSessions() }
+
+
+// ============================================================
 // TÉLÉCHARGEMENTS
 // ============================================================
 
@@ -2102,6 +2210,31 @@ document.getElementById('history-close').addEventListener('click', closeHistory)
 document.getElementById('history-clear').addEventListener('click', () => { historyData = []; saveHistory(); renderHistory() })
 document.getElementById('history-search').addEventListener('input', e => renderHistory(e.target.value))
 
+document.getElementById('sessions-close').addEventListener('click', closeSessions)
+document.getElementById('btn-sessions').addEventListener('click', toggleSessions)
+document.getElementById('sessions-new-btn').addEventListener('click', () => {
+  const form = document.getElementById('sessions-save-form')
+  form.style.display = form.style.display === 'none' ? 'flex' : 'none'
+  if (form.style.display === 'flex') {
+    const input = document.getElementById('sessions-name-input')
+    const d = new Date()
+    input.value = `Session — ${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+    input.focus(); input.select()
+  }
+})
+document.getElementById('sessions-confirm-btn').addEventListener('click', () => {
+  const name = document.getElementById('sessions-name-input').value.trim()
+  saveCurrentSession(name)
+  document.getElementById('sessions-save-form').style.display = 'none'
+})
+document.getElementById('sessions-cancel-btn').addEventListener('click', () => {
+  document.getElementById('sessions-save-form').style.display = 'none'
+})
+document.getElementById('sessions-name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('sessions-confirm-btn').click()
+  if (e.key === 'Escape') document.getElementById('sessions-cancel-btn').click()
+})
+
 window.bridge.onDlStart(d => {
   downloads.set(d.id, { filename: d.filename, received: 0, total: d.total, state: 'progressing', savePath: '' })
   renderDownloads()
@@ -2340,7 +2473,7 @@ if (savedWidth) { sidebar.style.width = savedWidth + 'px'; sidebar.style.minWidt
 window.bridge.onFullscreenChange(isFS => document.body.classList.toggle('fullscreen', isFS))
 window.bridge.onOpenNewTab(url => { if (url) createTab(url) })
 
-loadState(); loadHistory(); render(); startArchiveTimer(); startScrollSaver()
+loadState(); loadHistory(); loadSessions(); render(); startArchiveTimer(); startScrollSaver()
 setInterval(autoSuspendCheck, 5 * 60 * 1000)
 
 const activeItem = activeEssentialId

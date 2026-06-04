@@ -68,6 +68,15 @@ ipcMain.handle('state-load', () => cachedAppState)
 ipcMain.handle('state-save', (_, s) => { cachedAppState = s; writeAppState(s) })
 ipcMain.on('state-load-sync', e => { e.returnValue = cachedAppState })
 
+// ── Sessions nommées
+const sessionsPath = path.join(app.getPath('userData'), 'sessions.json')
+let cachedSessions = []
+try { cachedSessions = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8')) } catch {}
+function writeSessions(s) { try { fs.writeFileSync(sessionsPath, JSON.stringify(s)) } catch {} }
+
+ipcMain.handle('sessions-save', (_, s) => { cachedSessions = s; writeSessions(s) })
+ipcMain.on('sessions-load-sync', e => { e.returnValue = cachedSessions })
+
 // ── Historique persistant
 const historyPath = path.join(app.getPath('userData'), 'history.json')
 let cachedHistory = []

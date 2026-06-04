@@ -1,8 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 // Chargé synchronement avant que app.js tourne — élimine tout problème de timing
-const __divoInitState   = ipcRenderer.sendSync('state-load-sync')
-const __divoInitHistory = ipcRenderer.sendSync('history-load-sync')
+const __divoInitState    = ipcRenderer.sendSync('state-load-sync')
+const __divoInitHistory  = ipcRenderer.sendSync('history-load-sync')
+const __divoInitSessions = ipcRenderer.sendSync('sessions-load-sync')
 
 contextBridge.exposeInMainWorld('bridge', {
   minimize:             () => ipcRenderer.send('window-minimize'),
@@ -46,9 +47,11 @@ contextBridge.exposeInMainWorld('bridge', {
   removeUserExtension:  (id)  => ipcRenderer.invoke('remove-user-extension', id),
   toggleUserExtension:  (id, enabled) => ipcRenderer.invoke('toggle-user-extension', id, enabled),
   onExtensionInstalled: (cb)  => ipcRenderer.on('extension-installed', (_, d) => cb(d)),
-  initState:   __divoInitState,
-  initHistory: __divoInitHistory,
-  historySave: (h) => ipcRenderer.invoke('history-save', h),
+  initState:    __divoInitState,
+  initHistory:  __divoInitHistory,
+  historySave:  (h) => ipcRenderer.invoke('history-save', h),
+  initSessions:  __divoInitSessions,
+  sessionsSave:  (s) => ipcRenderer.invoke('sessions-save', s),
   stateSave: (s)   => ipcRenderer.invoke('state-save', s),
   rendererLog: (msg) => ipcRenderer.send('renderer-log', msg),
 })

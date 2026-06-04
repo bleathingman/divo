@@ -176,6 +176,9 @@
 
       <!-- Footer -->
       <div class="sidebar-footer">
+        <button class="dl-toggle-btn" id="btn-sessions" title="Sessions">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="5" rx="1"/></svg>
+        </button>
         <button class="dl-toggle-btn" id="btn-settings" title="Paramètres">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="12" r="3"></circle>
@@ -246,6 +249,23 @@
           <input id="history-search" class="history-search" type="text" placeholder="Rechercher…" autocomplete="off" spellcheck="false">
         </div>
         <div class="history-list" id="history-list"></div>
+      </div>
+
+      <div class="sessions-panel" id="sessions-panel">
+        <div class="sessions-header">
+          <span class="sessions-title">Sessions</span>
+          <button class="sessions-header-btn" id="sessions-new-btn" title="Sauvegarder les onglets actuels">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Sauvegarder
+          </button>
+          <button class="sessions-header-btn" id="sessions-close">✕</button>
+        </div>
+        <div class="sessions-save-form" id="sessions-save-form" style="display:none">
+          <input id="sessions-name-input" class="sessions-name-input" type="text" placeholder="Nom de la session…" autocomplete="off" spellcheck="false">
+          <button id="sessions-confirm-btn">OK</button>
+          <button id="sessions-cancel-btn">Annuler</button>
+        </div>
+        <div class="sessions-list" id="sessions-list"></div>
       </div>
 
       <div class="dl-bar" id="dl-bar">

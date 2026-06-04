@@ -1005,6 +1005,152 @@ body.light .default-browser-bar { background: #e8f0fe; border-bottom-color: #4a9
   color: #f5f5f7
 }
 
+/* ── SESSIONS ── */
+.sessions-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 320px;
+  background: #1c1c1e;
+  border-left: 1px solid #2c2c2e;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform .2s ease;
+}
+.sessions-panel.visible { transform: translateX(0) }
+.sessions-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid #252527;
+  gap: 8px;
+}
+.sessions-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f5f5f7;
+  flex: 1;
+}
+.sessions-header-btn {
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 7px;
+  color: #e8e8ed;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: background .15s;
+}
+.sessions-header-btn:hover { background: #3a3a3c }
+.sessions-save-form {
+  padding: 8px 12px;
+  border-bottom: 1px solid #252527;
+  display: flex;
+  gap: 6px;
+}
+.sessions-name-input {
+  flex: 1;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 7px;
+  color: #f5f5f7;
+  font-size: 12px;
+  padding: 5px 9px;
+  outline: none;
+}
+.sessions-name-input:focus { border-color: #0a84ff }
+.sessions-save-form button {
+  background: #0a84ff;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.sessions-save-form button:last-child { background: #3a3a3c; color: #e8e8ed }
+.sessions-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.sessions-empty {
+  padding: 30px;
+  text-align: center;
+  font-size: 13px;
+  color: #48484a;
+}
+.session-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 9px 12px;
+  border-bottom: 1px solid #1f1f21;
+  gap: 8px;
+}
+.session-item:hover { background: rgba(255,255,255,.04) }
+.session-item-main { flex: 1; min-width: 0 }
+.session-name {
+  font-size: 13px;
+  color: #e8e8ed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  outline: none;
+  border-radius: 4px;
+  padding: 1px 3px;
+  margin: -1px -3px;
+}
+.session-name:focus { background: #2c2c2e; white-space: normal; overflow: visible; color: #f5f5f7 }
+.session-meta {
+  font-size: 11px;
+  color: #636366;
+  margin-top: 2px;
+}
+.session-actions { display: flex; gap: 4px; flex-shrink: 0 }
+.session-btn {
+  background: none;
+  border: none;
+  color: #636366;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 5px;
+  transition: background .1s, color .1s;
+}
+.session-btn:hover { background: #3a3a3c; color: #e8e8ed }
+.session-btn.session-restore:hover { color: #30d158 }
+.session-btn.session-delete:hover  { color: #ff453a }
+.session-preview {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  width: 200px;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 8px;
+  padding: 6px 0;
+  z-index: 99;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+}
+.session-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #aeaeb2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-preview-item img { width: 12px; height: 12px; flex-shrink: 0 }
+.session-preview-more { padding: 4px 10px; font-size: 11px; color: #636366 }
+
 /* ── HISTORY ── */
 .history-panel {
   position: absolute;
@@ -1601,6 +1747,19 @@ body.light #find-input { background: #fff; color: #1c1c1e; border-color: #d1d1d6
 body.light .find-nav { color: #636366 }
 body.light .find-nav:hover { background: #e5e5ea }
 body.light #find-count { color: #636366 }
+
+body.light .sessions-panel { background: #f2f2f7; border-left-color: #d1d1d6 }
+body.light .sessions-header { border-bottom-color: #d1d1d6 }
+body.light .sessions-title { color: #1c1c1e }
+body.light .sessions-header-btn { background: #e5e5ea; border-color: #d1d1d6; color: #1c1c1e }
+body.light .sessions-save-form { border-bottom-color: #d1d1d6 }
+body.light .sessions-name-input { background: #fff; border-color: #d1d1d6; color: #1c1c1e }
+body.light .session-item { border-bottom-color: #e5e5ea }
+body.light .session-item:hover { background: rgba(0,0,0,.04) }
+body.light .session-name { color: #1c1c1e }
+body.light .sessions-empty { color: #8e8e93 }
+body.light .session-preview { background: #fff; border-color: #d1d1d6 }
+body.light .session-preview-item { color: #3a3a3c }
 
 body.light .history-panel { background: #f2f2f7; border-left-color: #d1d1d6 }
 body.light .history-header { border-bottom-color: #d1d1d6 }
