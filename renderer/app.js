@@ -2643,9 +2643,7 @@ favoritesList.addEventListener('drop', e => {
   }
 
   // ── Helpers
-  function getHistory() {
-    try { return JSON.parse(localStorage.getItem('arc-history') || '[]') } catch { return [] }
-  }
+  function getHistory() { return historyData || [] }
 
   function match(q, title, url) {
     if (!q) return true
