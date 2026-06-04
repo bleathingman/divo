@@ -915,11 +915,18 @@ function navigate(url, preserveContent = false) {
 
 function updateNavButtons() {
   if (!webviewReady) return
-  const canBack = wv().canGoBack()
-  const canFwd  = wv().canGoForward()
-  btnBack.disabled    = !canBack;  topBtnBack.disabled    = !canBack
-  btnForward.disabled = !canFwd;   topBtnForward.disabled = !canFwd
-  updateReaderBtn()
+  try {
+    const canBack = wv().canGoBack()
+    const canFwd  = wv().canGoForward()
+    btnBack.disabled    = !canBack;  topBtnBack.disabled    = !canBack
+    btnForward.disabled = !canFwd;   topBtnForward.disabled = !canFwd
+    updateReaderBtn()
+  } catch {
+    // guestInstanceId invalide (webview détaché) — reset propre
+    webviewReady = false
+    btnBack.disabled = true;    topBtnBack.disabled = true
+    btnForward.disabled = true; topBtnForward.disabled = true
+  }
 }
 
 function updateTitlebarFavicon() {
@@ -2178,8 +2185,8 @@ function handleShortcut(mod, shift, alt, code) {
   if (code === 'F11') { window.bridge.toggleFullscreen(); return true }
   if (code === 'F12') { if (webviewReady) wv().openDevTools(); return true }
   if (mod && shift && code === 'KeyI') { if (webviewReady) wv().openDevTools(); return true }
-  if (alt && code === 'ArrowLeft')  { if (webviewReady && wv().canGoBack())    wv().goBack();    return true }
-  if (alt && code === 'ArrowRight') { if (webviewReady && wv().canGoForward()) wv().goForward(); return true }
+  if (alt && code === 'ArrowLeft')  { try { if (webviewReady && wv().canGoBack())    wv().goBack()    } catch {} return true }
+  if (alt && code === 'ArrowRight') { try { if (webviewReady && wv().canGoForward()) wv().goForward() } catch {} return true }
   if (mod && (code === 'Equal'  || code === 'NumpadAdd'))      { zoomIn();    return true }
   if (mod && (code === 'Minus'  || code === 'NumpadSubtract')) { zoomOut();   return true }
   if (mod && (code === 'Digit0' || code === 'Numpad0'))        { zoomReset(); return true }
@@ -2290,9 +2297,11 @@ contextMenu.addEventListener('click', e => {
     case 'update-essential-url': {
       const ess = essentials.find(e => e.id === targetId)
       const ev  = pageWebviews.get(targetId)
-      if (ess && ev && !ev.isDestroyed()) {
-        const newUrl = ev.getURL()
-        if (newUrl && !isSpecial(newUrl)) { ess.url = newUrl; saveState(); renderEssentials() }
+      if (ess && ev) {
+        try {
+          const newUrl = ev.getURL()
+          if (newUrl && !isSpecial(newUrl)) { ess.url = newUrl; saveState(); renderEssentials() }
+        } catch {}
       }
       break
     }
@@ -2374,8 +2383,8 @@ urlInput.addEventListener('keydown', e => {
   navigate(url)
 })
 
-btnBack.addEventListener('click',    () => { if (webviewReady && wv().canGoBack())    wv().goBack() })
-btnForward.addEventListener('click', () => { if (webviewReady && wv().canGoForward()) wv().goForward() })
+btnBack.addEventListener('click',    () => { try { if (webviewReady && wv().canGoBack())    wv().goBack()    } catch {} })
+btnForward.addEventListener('click', () => { try { if (webviewReady && wv().canGoForward()) wv().goForward() } catch {} })
 btnReload.addEventListener('click',  () => { if (!webviewReady) return; isLoading ? wv().stop() : wv().reload() })
 btnMute.addEventListener('click', () => {
   globalMuted = !globalMuted
@@ -2403,8 +2412,8 @@ topUrlInput.addEventListener('keydown', e => {
   if (activeTabId && !activeEssentialId) { const tab = tabs.find(t => t.id === activeTabId); if (tab) tab.url = url }
   navigate(url)
 })
-topBtnBack.addEventListener('click',    () => { if (webviewReady && wv().canGoBack())    wv().goBack() })
-topBtnForward.addEventListener('click', () => { if (webviewReady && wv().canGoForward()) wv().goForward() })
+topBtnBack.addEventListener('click',    () => { try { if (webviewReady && wv().canGoBack())    wv().goBack()    } catch {} })
+topBtnForward.addEventListener('click', () => { try { if (webviewReady && wv().canGoForward()) wv().goForward() } catch {} })
 topBtnReload.addEventListener('click',  () => { if (!webviewReady) return; isLoading ? wv().stop() : wv().reload() })
 topBtnMute.addEventListener('click',    () => btnMute.click())
 btnReader.addEventListener('click',    toggleReader)
@@ -2421,8 +2430,10 @@ document.getElementById('reader-font-plus').addEventListener('click', () => {
 
 // Boutons souris supplémentaires (retour = 3, avant = 4)
 window.addEventListener('mouseup', e => {
-  if (e.button === 3) { if (webviewReady && wv().canGoBack())    wv().goBack() }
-  if (e.button === 4) { if (webviewReady && wv().canGoForward()) wv().goForward() }
+  try {
+    if (e.button === 3) { if (webviewReady && wv().canGoBack())    wv().goBack() }
+    if (e.button === 4) { if (webviewReady && wv().canGoForward()) wv().goForward() }
+  } catch {}
 })
 document.getElementById('top-btn-new-tab').addEventListener('click', () => createTab())
 topTabsList.addEventListener('click', e => {
