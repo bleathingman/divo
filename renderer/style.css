@@ -1624,6 +1624,85 @@ body.light .reader-close:hover { background: #e5e5ea; color: #1c1c1e }
   display: inline-block
 }
 
+/* ── Color row in context menu ── */
+.ctx-color-row {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  flex-wrap: wrap
+}
+.ctx-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform .1s, border-color .1s
+}
+.ctx-color-swatch:hover { transform: scale(1.2) }
+.ctx-color-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.4) }
+
+/* ── Emoji icon sur les espaces ── */
+.space-emoji {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0
+}
+
+/* ── Emoji picker ── */
+.emoji-picker {
+  position: fixed;
+  z-index: 9000;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  width: 236px
+}
+.emoji-row {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 2px
+}
+.emoji-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 6px;
+  transition: background .1s;
+  width: 22px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center
+}
+.emoji-btn:hover { background: #2c2c2e }
+.emoji-remove-btn {
+  width: 100%;
+  margin-top: 6px;
+  background: none;
+  border: none;
+  border-top: 1px solid #2c2c2e;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #636366;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 0 0 4px 4px
+}
+.emoji-remove-btn:hover { color: #aeaeb2; background: #252527 }
+
+body.light .emoji-picker { background: #fff; border-color: #e5e5ea; box-shadow: 0 8px 32px rgba(0,0,0,.15) }
+body.light .emoji-btn:hover { background: #f2f2f7 }
+body.light .emoji-remove-btn { border-top-color: #e5e5ea; color: #8e8e93 }
+body.light .emoji-remove-btn:hover { color: #3a3a3c; background: #f2f2f7 }
+body.light .ctx-color-swatch.active { border-color: #1c1c1e; box-shadow: 0 0 0 1px rgba(0,0,0,.3) }
+
 /* ── DRAG & DROP ── */
 .tab-item.dragging {
   opacity: .35

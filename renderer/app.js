@@ -141,6 +141,22 @@ const ICO = {
 }
 
 const SPACE_COLORS = ['#0a84ff', '#34c759', '#ff9f0a', '#bf5af2', '#ff453a', '#ff6b35', '#30d158', '#64d2ff']
+const SPACE_EMOJIS = [
+  '🏠','💼','📚','🎨','🎮','🎵','🎬','🌍','🚀','💡',
+  '🔥','⚡','🌟','❤️','✅','📝','🔍','💻','📱','🛒',
+  '🎯','🏆','🎓','🔑','⚙️','🎧','🌈','🍕','☕','🌙',
+  '😀','😎','🤩','🥳','🤓','😈','👻','🦊','🐱','🐶',
+  '🦁','🐻','🐸','🦋','🌺','🌸','🍀','🎃','🎄','🎁',
+  '💎','🏖️','🌴','🎸','🎹','🎲','♟️','🏀','⚽','🎾',
+  '🚗','✈️','🛸','🌊','⛰️','🏡','🍔','🍜','🍣','🧁'
+]
+
+function hexToRgba(hex, a) {
+  try {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16)
+    return `rgba(${r},${g},${b},${a})`
+  } catch { return hex }
+}
 
 // SEC-002 — helper anti-XSS pour innerHTML
 function escapeHtml(s) {
@@ -1545,18 +1561,32 @@ let dragSpaceId = null
 function renderSpaces() {
   const frag = document.createDocumentFragment()
   for (const space of spaces) {
+    const isActive = space.id === activeSpaceId
+    const c = safeColor(space.color)
     const btn = document.createElement('button')
-    btn.className = 'space-pill' + (space.id === activeSpaceId ? ' active' : '')
+    btn.className = 'space-pill' + (isActive ? ' active' : '')
     btn.dataset.spaceId = space.id
     btn.title = space.name
     btn.draggable = true
-    const dot = document.createElement('span')
-    dot.className = 'space-color-dot'
-    dot.style.background = safeColor(space.color)
+    if (isActive) {
+      btn.style.background = hexToRgba(c, 0.14)
+      btn.style.color = c
+    }
+    if (space.icon) {
+      const ico = document.createElement('span')
+      ico.className = 'space-emoji'
+      ico.textContent = space.icon
+      btn.appendChild(ico)
+    } else {
+      const dot = document.createElement('span')
+      dot.className = 'space-color-dot'
+      dot.style.background = c
+      btn.appendChild(dot)
+    }
     const lbl = document.createElement('span')
     lbl.className = 'space-pill-name'
     lbl.textContent = space.name
-    btn.appendChild(dot); btn.appendChild(lbl)
+    btn.appendChild(lbl)
     btn.addEventListener('click', () => { if (!dragSpaceId) switchSpace(space.id) })
     btn.addEventListener('dblclick', e => { e.preventDefault(); if (space.id === activeSpaceId) startRenameSpace(space.id) })
     btn.addEventListener('contextmenu', e => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, space.id, 'space') })
@@ -1620,6 +1650,50 @@ function startRenameSpace(id) {
   })
 }
 
+
+// ── Emoji picker pour les espaces
+let emojiPickerSpaceId = null
+
+function openEmojiPicker(spaceId) {
+  emojiPickerSpaceId = spaceId
+  const picker = document.getElementById('emoji-picker')
+  const btn = spacesList.querySelector(`[data-space-id="${spaceId}"]`)
+  const rows = []
+  for (let i = 0; i < SPACE_EMOJIS.length; i += 10) {
+    rows.push(SPACE_EMOJIS.slice(i, i + 10).map(e =>
+      `<button class="emoji-btn" data-emoji="${e}">${e}</button>`
+    ).join(''))
+  }
+  picker.innerHTML = rows.map(r => `<div class="emoji-row">${r}</div>`).join('') +
+    `<button class="emoji-remove-btn" data-emoji="">Supprimer l'icône</button>`
+  picker.style.display = 'block'
+  // Positionner près du bouton d'espace
+  if (btn) {
+    const r = btn.getBoundingClientRect()
+    picker.style.left = Math.max(4, r.left) + 'px'
+    picker.style.top  = (r.bottom + 4) + 'px'
+  } else {
+    picker.style.left = '8px'; picker.style.top = '60px'
+  }
+  setTimeout(() => document.addEventListener('click', closeEmojiPickerOutside), 0)
+}
+
+function closeEmojiPicker() {
+  document.getElementById('emoji-picker').style.display = 'none'
+  document.removeEventListener('click', closeEmojiPickerOutside)
+  emojiPickerSpaceId = null
+}
+
+function closeEmojiPickerOutside(e) {
+  if (!document.getElementById('emoji-picker').contains(e.target)) closeEmojiPicker()
+}
+
+document.getElementById('emoji-picker').addEventListener('click', e => {
+  const btn = e.target.closest('[data-emoji]'); if (!btn) return
+  const sp = spaces.find(s => s.id === emojiPickerSpaceId)
+  if (sp) { sp.icon = btn.dataset.emoji; saveState(); renderSpaces() }
+  closeEmojiPicker()
+})
 
 // ============================================================
 // AUTO-ARCHIVE
@@ -1775,9 +1849,16 @@ function render() { renderSpaces(); renderEssentials(); renderFavorites(); rende
 
 function buildContextMenu(type) {
   if (type === 'space') {
-    const only = spaces.length <= 1
+    const only  = spaces.length <= 1
+    const space = spaces.find(s => s.id === ctxTargetId)
+    const swatches = SPACE_COLORS.map(c =>
+      `<button class="ctx-color-swatch${space?.color === c ? ' active' : ''}" data-action="set-space-color" data-color="${c}" style="background:${c}" title="${c}"></button>`
+    ).join('')
     contextMenu.innerHTML = `
       <button class="ctx-item" data-action="rename-space">${ICO.rename} Renommer</button>
+      <button class="ctx-item" data-action="pick-space-emoji"><span style="font-size:13px">${space?.icon || '😊'}</span> Icône emoji</button>
+      <div class="ctx-divider"></div>
+      <div class="ctx-color-row">${swatches}</div>
       <div class="ctx-divider"></div>
       <button class="ctx-item danger" data-action="delete-space" ${only ? 'disabled style="opacity:.4;pointer-events:none"' : ''}>${ICO.close} Supprimer l'espace</button>
     `
@@ -2167,6 +2248,10 @@ function reorder(arr, srcId, tgtId, clientY, tgtEl) {
 // ============================================================
 
 function handleShortcut(mod, shift, alt, code) {
+  if (mod && !shift && !alt && /^Digit[1-9]$/.test(code)) {
+    const n = parseInt(code[5]) - 1
+    if (n < spaces.length) { switchSpace(spaces[n].id); return true }
+  }
   if (mod && !shift && code === 'KeyT') { createTab(); return true }
   if (mod && shift && code === 'KeyT') { restoreClosedTab(); return true }
   if (mod && shift && code === 'KeyN') { createTab(null, true); return true }
@@ -2312,7 +2397,15 @@ contextMenu.addEventListener('click', e => {
     case 'move-to-folder':     moveToFolder(targetId, btn.dataset.folderId); break
     case 'remove-from-folder': moveToFolder(targetId, null); break
     case 'rename-space':       renameSpace(targetId); break
-    case 'delete-space':     deleteSpace(targetId); break
+    case 'delete-space':       deleteSpace(targetId); break
+    case 'set-space-color': {
+      const sp = spaces.find(s => s.id === targetId)
+      if (sp) { sp.color = btn.dataset.color; saveState(); renderSpaces() }
+      break
+    }
+    case 'pick-space-emoji':
+      requestAnimationFrame(() => openEmojiPicker(targetId))
+      break
   }
 })
 
