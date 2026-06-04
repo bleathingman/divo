@@ -54,8 +54,10 @@ const progressBar   = document.getElementById('progress-bar')
 const findBar       = document.getElementById('find-bar')
 const findInput     = document.getElementById('find-input')
 const findCount     = document.getElementById('find-count')
-const historyPanel  = document.getElementById('history-panel')
-const sessionsPanel = document.getElementById('sessions-panel')
+const historyPanel    = document.getElementById('history-panel')
+const sessionsPanel   = document.getElementById('sessions-panel')
+const passwordsPanel  = document.getElementById('passwords-panel')
+const autofillBar     = document.getElementById('autofill-bar')
 const dlBar         = document.getElementById('dl-bar')
 const dlList        = document.getElementById('dl-list')
 const tabsSection   = document.querySelector('.tabs-section')
@@ -266,6 +268,8 @@ let zoomLevel       = 1.0
 let progressTimer   = null
 let historyData     = []
 let sessionsData    = []
+let passwordsData   = []
+let autofillCred    = null
 let sidebarVisible  = true
 let focusMode       = false
 let downloads       = new Map()
@@ -559,6 +563,7 @@ function wireWebviewEvents(el) {
     if (el !== wv()) return
     isLoading = false; btnReload.innerHTML = ICON_RELOAD; btnReload.title = 'Recharger'
     completeProgress(); updateNavButtons()
+    checkAutofill()
     const url = el.getURL()
     if (isNewtab(url)) {
       const engine = localStorage.getItem('divo-search-engine') || 'google'
@@ -1651,6 +1656,139 @@ function startRenameSpace(id) {
 }
 
 
+// ── Gestionnaire de mots de passe
+function getDomain(url) {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
+}
+
+function loadPasswords() {
+  passwordsData = window.bridge.initPasswords || []
+}
+
+function savePasswords() {
+  window.bridge.passwordsSave(passwordsData)
+}
+
+function getPasswordsForUrl(url) {
+  const domain = getDomain(url)
+  if (!domain) return []
+  return passwordsData.filter(p => domain === p.domain || domain.endsWith('.' + p.domain) || p.domain.endsWith('.' + domain))
+}
+
+function addOrUpdatePassword(url, username, password) {
+  if (!username || !password) return
+  const domain = getDomain(url) || url.replace(/^https?:\/\//, '').split('/')[0]
+  const idx = passwordsData.findIndex(p => p.domain === domain && p.username === username)
+  if (idx >= 0) {
+    passwordsData[idx].password  = password
+    passwordsData[idx].updatedAt = Date.now()
+  } else {
+    passwordsData.unshift({ id: 'pw' + Date.now(), domain, url, username, password, createdAt: Date.now(), lastUsed: 0 })
+  }
+  savePasswords(); renderPasswords()
+}
+
+function deletePassword(id) {
+  passwordsData = passwordsData.filter(p => p.id !== id)
+  savePasswords(); renderPasswords()
+}
+
+function renderPasswords(filter) {
+  const list = document.getElementById('passwords-list'); if (!list) return
+  const items = filter
+    ? passwordsData.filter(p => p.domain.toLowerCase().includes(filter) || p.username.toLowerCase().includes(filter))
+    : passwordsData
+  if (!items.length) {
+    list.innerHTML = `<div class="passwords-empty">${filter ? 'Aucun résultat' : 'Aucun mot de passe enregistré'}</div>`
+    return
+  }
+  const ICO_KEY   = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`
+  const ICO_COPY  = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
+  const ICO_TRASH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`
+  list.innerHTML = items.map(p => `
+    <div class="password-item" data-id="${p.id}">
+      <img class="password-favicon" src="https://${escapeHtml(p.domain)}/favicon.ico" draggable="false">
+      <div class="password-info">
+        <div class="password-domain">${escapeHtml(p.domain)}</div>
+        <div class="password-username">${escapeHtml(p.username)}</div>
+      </div>
+      <div class="password-actions">
+        <button class="pw-action-btn" data-pw-action="autofill" data-id="${p.id}" title="Remplir le formulaire">${ICO_KEY}</button>
+        <button class="pw-action-btn" data-pw-action="copy-pwd" data-id="${p.id}" title="Copier le mot de passe">${ICO_COPY}</button>
+        <button class="pw-action-btn danger" data-pw-action="delete" data-id="${p.id}" title="Supprimer">${ICO_TRASH}</button>
+      </div>
+    </div>`).join('')
+}
+
+function openPasswordsPanel() {
+  closeHistory(); closeSessions()
+  passwordsPanel.classList.add('visible')
+  renderPasswords()
+  setTimeout(() => document.getElementById('passwords-search')?.focus(), 80)
+}
+
+function closePasswordsPanel() {
+  passwordsPanel.classList.remove('visible')
+  hidePasswordAddForm()
+}
+
+function togglePasswordsPanel() {
+  passwordsPanel.classList.contains('visible') ? closePasswordsPanel() : openPasswordsPanel()
+}
+
+function showPasswordAddForm(prefill = {}) {
+  const form = document.getElementById('passwords-add-form'); if (!form) return
+  form.style.display = ''
+  if (prefill.url)      document.getElementById('pw-url-input').value  = prefill.url  || ''
+  if (prefill.username) document.getElementById('pw-user-input').value = prefill.username || ''
+  if (prefill.password) document.getElementById('pw-pwd-input').value  = prefill.password || ''
+  document.getElementById('pw-url-input').focus()
+}
+
+function hidePasswordAddForm() {
+  const form = document.getElementById('passwords-add-form'); if (!form) return
+  form.style.display = 'none'
+  document.getElementById('pw-url-input').value  = ''
+  document.getElementById('pw-user-input').value = ''
+  document.getElementById('pw-pwd-input').value  = ''
+}
+
+// Autofill — injecter identifiants dans le formulaire de la page active
+async function doAutofill(cred) {
+  const el = wv(); if (!el?.__ready || !cred) return
+  try {
+    const u = JSON.stringify(cred.username), p = JSON.stringify(cred.password)
+    await el.executeJavaScript(`(function(){
+      const u=${u}, p=${p}
+      function fill(el,v){if(!el)return;const d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');d.set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
+      const uField=document.querySelector('input[type="email"],input[autocomplete*="username"],input[autocomplete*="email"],input[name*="user"],input[name*="email"],input[name*="login"]')||[...document.querySelectorAll('input[type="text"]')].find(i=>i.offsetParent)
+      const pField=document.querySelector('input[type="password"]')
+      fill(uField,u); fill(pField,p)
+    })()`)
+    const entry = passwordsData.find(pw => pw.id === cred.id)
+    if (entry) { entry.lastUsed = Date.now(); savePasswords() }
+  } catch {}
+  autofillBar.classList.remove('visible')
+}
+
+// Détection form login sur la page active → montrer barre autofill
+async function checkAutofill() {
+  const el = wv(); if (!el?.__ready) return
+  const url = el.getURL(); if (isSpecial(url)) return
+  const creds = getPasswordsForUrl(url)
+  if (!creds.length) { autofillBar.classList.remove('visible'); return }
+  try {
+    const hasForm = await el.executeJavaScript(`!!document.querySelector('input[type="password"]')`)
+    if (hasForm) {
+      autofillCred = creds[0]
+      document.getElementById('autofill-text').textContent = `${creds[0].username} — ${creds[0].domain}`
+      autofillBar.classList.add('visible')
+    } else {
+      autofillBar.classList.remove('visible')
+    }
+  } catch {}
+}
+
 // ── Emoji picker pour les espaces
 let emojiPickerSpaceId = null
 
@@ -2423,6 +2561,56 @@ document.getElementById('history-clear').addEventListener('click', () => { histo
 document.getElementById('history-search').addEventListener('input', e => renderHistory(e.target.value))
 
 document.getElementById('sessions-close').addEventListener('click', closeSessions)
+document.getElementById('btn-passwords').addEventListener('click', togglePasswordsPanel)
+document.getElementById('passwords-close-btn').addEventListener('click', closePasswordsPanel)
+document.getElementById('passwords-add-btn').addEventListener('click', () => showPasswordAddForm())
+document.getElementById('pw-cancel-btn').addEventListener('click', hidePasswordAddForm)
+document.getElementById('pw-eye-btn').addEventListener('click', () => {
+  const inp = document.getElementById('pw-pwd-input')
+  inp.type = inp.type === 'password' ? 'text' : 'password'
+})
+document.getElementById('pw-extract-btn').addEventListener('click', async () => {
+  const el = wv(); if (!el?.__ready) return
+  try {
+    const data = await el.executeJavaScript(`(function(){
+      const u=document.querySelector('input[type="email"],input[autocomplete*="username"],input[autocomplete*="email"],input[name*="user"],input[name*="email"],input[name*="login"]')||[...document.querySelectorAll('input[type="text"]')].find(i=>i.offsetParent)
+      const p=document.querySelector('input[type="password"]')
+      return {url:location.href, username:u?.value||'', password:p?.value||''}
+    })()`)
+    if (data) showPasswordAddForm(data)
+  } catch {}
+})
+document.getElementById('pw-save-btn').addEventListener('click', () => {
+  const url  = document.getElementById('pw-url-input').value.trim()
+  const user = document.getElementById('pw-user-input').value.trim()
+  const pwd  = document.getElementById('pw-pwd-input').value
+  if (!url || !user || !pwd) return
+  addOrUpdatePassword(url, user, pwd)
+  hidePasswordAddForm()
+})
+document.getElementById('passwords-search').addEventListener('input', e => renderPasswords(e.target.value.toLowerCase().trim()))
+document.getElementById('passwords-list').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-pw-action]'); if (!btn) return
+  const id = btn.dataset.id
+  const entry = passwordsData.find(p => p.id === id); if (!entry) return
+  switch (btn.dataset.pwAction) {
+    case 'autofill':
+      closePasswordsPanel()
+      await doAutofill(entry)
+      break
+    case 'copy-pwd':
+      try { await navigator.clipboard.writeText(entry.password) } catch {}
+      btn.style.color = '#34c759'
+      setTimeout(() => { btn.style.color = '' }, 1200)
+      break
+    case 'delete':
+      deletePassword(id)
+      break
+  }
+})
+document.getElementById('autofill-fill-btn').addEventListener('click', () => doAutofill(autofillCred))
+document.getElementById('autofill-dismiss-btn').addEventListener('click', () => autofillBar.classList.remove('visible'))
+
 document.getElementById('btn-sessions').addEventListener('click', toggleSessions)
 document.getElementById('sessions-new-btn').addEventListener('click', () => {
   const form = document.getElementById('sessions-save-form')
@@ -2698,7 +2886,7 @@ if (savedWidth) { sidebar.style.width = savedWidth + 'px'; sidebar.style.minWidt
 window.bridge.onFullscreenChange(isFS => document.body.classList.toggle('fullscreen', isFS))
 window.bridge.onOpenNewTab(url => { if (url) createTab(url) })
 
-loadState(); loadHistory(); loadSessions(); render(); startArchiveTimer(); startScrollSaver()
+loadState(); loadHistory(); loadSessions(); loadPasswords(); render(); startArchiveTimer(); startScrollSaver()
 setInterval(autoSuspendCheck, 5 * 60 * 1000)
 
 const activeItem = activeEssentialId

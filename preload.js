@@ -1,9 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 // Chargé synchronement avant que app.js tourne — élimine tout problème de timing
-const __divoInitState    = ipcRenderer.sendSync('state-load-sync')
-const __divoInitHistory  = ipcRenderer.sendSync('history-load-sync')
-const __divoInitSessions = ipcRenderer.sendSync('sessions-load-sync')
+const __divoInitState     = ipcRenderer.sendSync('state-load-sync')
+const __divoInitHistory   = ipcRenderer.sendSync('history-load-sync')
+const __divoInitSessions  = ipcRenderer.sendSync('sessions-load-sync')
+const __divoInitPasswords = ipcRenderer.sendSync('passwords-load-sync')
 
 contextBridge.exposeInMainWorld('bridge', {
   minimize:             () => ipcRenderer.send('window-minimize'),
@@ -50,8 +51,10 @@ contextBridge.exposeInMainWorld('bridge', {
   initState:    __divoInitState,
   initHistory:  __divoInitHistory,
   historySave:  (h) => ipcRenderer.invoke('history-save', h),
-  initSessions:  __divoInitSessions,
-  sessionsSave:  (s) => ipcRenderer.invoke('sessions-save', s),
+  initSessions:   __divoInitSessions,
+  sessionsSave:   (s) => ipcRenderer.invoke('sessions-save', s),
+  initPasswords:  __divoInitPasswords,
+  passwordsSave:  (p) => ipcRenderer.invoke('passwords-save', p),
   stateSave: (s)   => ipcRenderer.invoke('state-save', s),
   rendererLog: (msg) => ipcRenderer.send('renderer-log', msg),
 })

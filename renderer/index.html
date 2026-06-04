@@ -182,6 +182,9 @@
 
       <!-- Footer -->
       <div class="sidebar-footer">
+        <button class="dl-toggle-btn" id="btn-passwords" title="Mots de passe">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
+        </button>
         <button class="dl-toggle-btn" id="btn-sessions" title="Sessions">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="5" rx="1"/></svg>
         </button>
@@ -272,6 +275,42 @@
           <button id="sessions-cancel-btn">Annuler</button>
         </div>
         <div class="sessions-list" id="sessions-list"></div>
+      </div>
+
+      <!-- Barre autofill -->
+      <div class="autofill-bar" id="autofill-bar">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0a84ff" stroke-width="2" stroke-linecap="round" style="flex-shrink:0"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1" fill="#0a84ff"/></svg>
+        <span id="autofill-text">user@site.com</span>
+        <button class="perm-btn allow" id="autofill-fill-btn">Remplir</button>
+        <button class="perm-dismiss" id="autofill-dismiss-btn">✕</button>
+      </div>
+
+      <!-- Panel mots de passe -->
+      <div class="passwords-panel" id="passwords-panel">
+        <div class="passwords-header">
+          <span class="passwords-title">Mots de passe</span>
+          <button class="passwords-header-btn" id="passwords-add-btn" title="Ajouter">+ Ajouter</button>
+          <button class="passwords-header-btn" id="passwords-close-btn">✕</button>
+        </div>
+        <div class="passwords-search-wrap">
+          <input id="passwords-search" class="passwords-search" type="text" placeholder="Rechercher…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="passwords-add-form" id="passwords-add-form" style="display:none">
+          <input class="passwords-input" id="pw-url-input" type="text" placeholder="Site (ex: google.com)" autocomplete="off">
+          <input class="passwords-input" id="pw-user-input" type="text" placeholder="Identifiant / Email" autocomplete="off">
+          <div class="pw-pwd-wrap">
+            <input class="passwords-input" id="pw-pwd-input" type="password" placeholder="Mot de passe" autocomplete="new-password">
+            <button class="pw-eye-btn" id="pw-eye-btn" type="button" title="Afficher/masquer">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <button class="pw-extract-btn" id="pw-extract-btn" type="button">⬇ Extraire de la page</button>
+          <div class="passwords-form-actions">
+            <button class="pw-save-btn" id="pw-save-btn">Enregistrer</button>
+            <button class="pw-cancel-btn" id="pw-cancel-btn">Annuler</button>
+          </div>
+        </div>
+        <div class="passwords-list" id="passwords-list"></div>
       </div>
 
       <!-- Mode Reader -->

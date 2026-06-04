@@ -71,6 +71,51 @@ ipcMain.handle('state-load', () => cachedAppState)
 ipcMain.handle('state-save', (_, s) => { cachedAppState = s; writeAppState(s) })
 ipcMain.on('state-load-sync', e => { e.returnValue = cachedAppState })
 
+// ── Gestionnaire de mots de passe (AES-256-GCM)
+const VAULT_KEY_PATH = path.join(app.getPath('userData'), 'vault.key')
+const PASSWORDS_PATH = path.join(app.getPath('userData'), 'passwords.json')
+let _vaultKey = null
+function getVaultKey() {
+  if (_vaultKey) return _vaultKey
+  try {
+    const hex = fs.readFileSync(VAULT_KEY_PATH, 'utf-8').trim()
+    _vaultKey = Buffer.from(hex, 'hex')
+    if (_vaultKey.length !== 32) throw new Error('bad key length')
+  } catch {
+    _vaultKey = crypto.randomBytes(32)
+    try { fs.writeFileSync(VAULT_KEY_PATH, _vaultKey.toString('hex'), 'utf-8') } catch {}
+  }
+  return _vaultKey
+}
+function encryptPwd(plain) {
+  try {
+    const key = getVaultKey(), iv = crypto.randomBytes(12)
+    const c = crypto.createCipheriv('aes-256-gcm', key, iv)
+    const enc = Buffer.concat([c.update(plain, 'utf-8'), c.final()])
+    return iv.toString('hex') + ':' + enc.toString('hex') + ':' + c.getAuthTag().toString('hex')
+  } catch { return '' }
+}
+function decryptPwd(enc) {
+  try {
+    const parts = (enc || '').split(':')
+    if (parts.length !== 3) return ''
+    const key = getVaultKey()
+    const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(parts[0], 'hex'))
+    d.setAuthTag(Buffer.from(parts[2], 'hex'))
+    return d.update(Buffer.from(parts[1], 'hex')) + d.final('utf-8')
+  } catch { return '' }
+}
+let cachedPasswords = []
+try {
+  cachedPasswords = JSON.parse(fs.readFileSync(PASSWORDS_PATH, 'utf-8'))
+    .map(e => ({ ...e, password: decryptPwd(e.password) }))
+} catch {}
+function writePasswords(entries) {
+  try { fs.writeFileSync(PASSWORDS_PATH, JSON.stringify(entries.map(e => ({ ...e, password: encryptPwd(e.password) })))) } catch {}
+}
+ipcMain.on('passwords-load-sync', e => { e.returnValue = cachedPasswords })
+ipcMain.handle('passwords-save', (_, entries) => { cachedPasswords = entries; writePasswords(entries) })
+
 // ── Sessions nommées
 const sessionsPath = path.join(app.getPath('userData'), 'sessions.json')
 let cachedSessions = []

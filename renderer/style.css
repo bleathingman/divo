@@ -1133,6 +1133,133 @@ body.light .reader-font-btn:hover { background: #d1d1d6; color: #1c1c1e }
 body.light .reader-close { color: #aeaeb2 }
 body.light .reader-close:hover { background: #e5e5ea; color: #1c1c1e }
 
+/* ── PASSWORDS ── */
+.autofill-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: #1c1c1e;
+  border-top: 1px solid #3a3a3c;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  z-index: 300;
+  transform: translateY(100%);
+  transition: transform .18s;
+  font-size: 13px;
+  color: #aeaeb2;
+}
+.autofill-bar.visible { transform: translateY(0) }
+
+.passwords-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 320px;
+  background: #1c1c1e;
+  border-left: 1px solid #2c2c2e;
+  display: flex;
+  flex-direction: column;
+  z-index: 350;
+  transform: translateX(100%);
+  transition: transform .2s;
+  overflow: hidden;
+}
+.passwords-panel.visible { transform: translateX(0) }
+
+.passwords-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #2c2c2e;
+  flex-shrink: 0;
+}
+.passwords-title { font-size: 13px; font-weight: 600; color: #f5f5f7; flex: 1 }
+.passwords-header-btn {
+  background: #2c2c2e; border: none; border-radius: 6px;
+  color: #aeaeb2; font-size: 12px; padding: 4px 10px; cursor: pointer;
+}
+.passwords-header-btn:hover { background: #3a3a3c; color: #f5f5f7 }
+
+.passwords-search-wrap { padding: 8px 10px 4px; flex-shrink: 0 }
+.passwords-search {
+  width: 100%; background: #252527; border: none; border-radius: 7px;
+  color: #f5f5f7; font-size: 13px; padding: 7px 10px; outline: none;
+}
+.passwords-search::placeholder { color: #48484a }
+.passwords-search:focus { box-shadow: 0 0 0 2px rgba(10,132,255,.35) }
+
+.passwords-add-form {
+  padding: 10px 12px; border-bottom: 1px solid #2c2c2e; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.passwords-input {
+  width: 100%; background: #252527; border: none; border-radius: 7px;
+  color: #f5f5f7; font-size: 13px; padding: 7px 10px; outline: none;
+}
+.passwords-input::placeholder { color: #48484a }
+.passwords-input:focus { box-shadow: 0 0 0 2px rgba(10,132,255,.35) }
+.pw-pwd-wrap { position: relative }
+.pw-pwd-wrap .passwords-input { padding-right: 32px }
+.pw-eye-btn {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: #636366; cursor: pointer; padding: 2px;
+}
+.pw-eye-btn:hover { color: #aeaeb2 }
+.pw-extract-btn {
+  background: none; border: 1px solid #3a3a3c; border-radius: 6px;
+  color: #636366; font-size: 12px; padding: 5px 10px; cursor: pointer; text-align: left;
+}
+.pw-extract-btn:hover { border-color: #636366; color: #aeaeb2 }
+.passwords-form-actions { display: flex; gap: 8px }
+.pw-save-btn {
+  flex: 1; background: #0a84ff; border: none; border-radius: 7px;
+  color: #fff; font-size: 13px; font-weight: 500; padding: 7px; cursor: pointer;
+}
+.pw-save-btn:hover { filter: brightness(1.1) }
+.pw-cancel-btn {
+  background: #2c2c2e; border: none; border-radius: 7px;
+  color: #aeaeb2; font-size: 13px; padding: 7px 14px; cursor: pointer;
+}
+.pw-cancel-btn:hover { background: #3a3a3c }
+
+.passwords-list { flex: 1; overflow-y: auto; padding: 4px 0 }
+.passwords-empty { padding: 32px 16px; text-align: center; color: #48484a; font-size: 13px }
+
+.password-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; cursor: default;
+  border-bottom: 1px solid #222224;
+}
+.password-item:hover { background: #252527 }
+.password-favicon {
+  width: 20px; height: 20px; border-radius: 4px; flex-shrink: 0; object-fit: contain;
+}
+.password-info { flex: 1; min-width: 0 }
+.password-domain { font-size: 13px; color: #f5f5f7; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.password-username { font-size: 11px; color: #636366; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px }
+.password-actions { display: flex; gap: 4px; flex-shrink: 0 }
+.pw-action-btn {
+  background: none; border: none; color: #48484a; cursor: pointer;
+  padding: 4px; border-radius: 5px; display: flex; align-items: center;
+}
+.pw-action-btn:hover { background: #3a3a3c; color: #aeaeb2 }
+.pw-action-btn.danger:hover { background: rgba(255,69,58,.15); color: #ff453a }
+
+/* Light theme */
+body.light .autofill-bar { background: #fff; border-top-color: #e5e5ea; color: #636366 }
+body.light .passwords-panel { background: #f2f2f7; border-left-color: #d1d1d6 }
+body.light .passwords-header { border-bottom-color: #e5e5ea }
+body.light .passwords-title { color: #1c1c1e }
+body.light .passwords-header-btn { background: #e5e5ea; color: #3a3a3c }
+body.light .passwords-search { background: #fff; color: #1c1c1e }
+body.light .passwords-input { background: #fff; color: #1c1c1e }
+body.light .password-item { border-bottom-color: #e5e5ea }
+body.light .password-item:hover { background: #e5e5ea }
+body.light .password-domain { color: #1c1c1e }
+body.light .passwords-add-form { border-bottom-color: #e5e5ea }
+body.light .pw-cancel-btn { background: #e5e5ea; color: #3a3a3c }
+
 /* ── SESSIONS ── */
 .sessions-panel {
   position: absolute;
