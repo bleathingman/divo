@@ -1834,11 +1834,13 @@ function saveSessions() {
 }
 
 function saveCurrentSession(name) {
-  const tabList = getActiveTabs().filter(t => !t.private && !isSpecial(t.url))
+  const tabList = getActiveTabs().filter(t => !t.private)
   if (!tabList.length) return
+  const now = new Date()
+  const defaultName = `Session — ${now.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
   const session = {
     id: 's' + Date.now(),
-    name: name || `Session — ${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
+    name: (name && name.trim()) ? name.trim() : defaultName,
     savedAt: Date.now(),
     tabs: tabList.map(t => ({ url: t.url, title: t.title, favicon: t.favicon || null }))
   }
