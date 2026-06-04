@@ -40,6 +40,9 @@ const ADBLOCK_NEVER_BLOCK = new Set([
   'microsoft.com', 'microsoftonline.com', 'live.com', 'office.com',
   'cloudflare.com', 'cloudflare-dns.com',
   'fastly.net', 'akamaized.net', 'akamai.net',
+  // GitHub — requis pour electron-updater (api.github.com, releases, assets)
+  'github.com', 'api.github.com', 'githubusercontent.com', 'github-releases.githubusercontent.com',
+  'objects.githubusercontent.com', 'release-assets.githubusercontent.com',
 ])
 
 const WEBVIEW_SHORTCUTS = new Set([
@@ -1088,25 +1091,35 @@ function setupAutoUpdater() {
   if (!autoUpdater || !app.isPackaged) return
   writeLog('setupAutoUpdater: starting')
   try { autoUpdater.currentVersion } catch (e) { writeLog('autoUpdater init error: ' + e.message); return }
-  autoUpdater.logger = null
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = false
-  autoUpdater.on('update-available', info => {
-    pendingUpdateVersion = info.version
-    mainWindow?.webContents.send('update-available', { version: info.version })
-  })
-  autoUpdater.on('download-progress', p => {
-    mainWindow?.webContents.send('update-progress', Math.round(p.percent))
-  })
-  autoUpdater.on('update-downloaded', () => {
-    mainWindow?.webContents.send('update-progress', 100)
-  })
-  autoUpdater.on('error', (e) => writeLog('autoUpdater error: ' + (e?.message || e)))
-  setTimeout(() => {
-    writeLog('autoUpdater: checking for updates...')
-    autoUpdater.checkForUpdates().catch(e => writeLog('checkForUpdates error: ' + e?.message))
-  }, 10000)
-  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 60 * 60 * 1000)
+  try {
+    autoUpdater.logger = null
+    autoUpdater.autoDownload = false
+    autoUpdater.autoInstallOnAppQuit = false
+    autoUpdater.on('update-available', info => {
+      try {
+        pendingUpdateVersion = info.version
+        mainWindow?.webContents.send('update-available', { version: info.version })
+      } catch {}
+    })
+    autoUpdater.on('download-progress', p => {
+      try { mainWindow?.webContents.send('update-progress', Math.round(p.percent)) } catch {}
+    })
+    autoUpdater.on('update-downloaded', () => {
+      try { mainWindow?.webContents.send('update-progress', 100) } catch {}
+    })
+    autoUpdater.on('error', (e) => writeLog('autoUpdater error: ' + (e?.message || e)))
+    setTimeout(() => {
+      try {
+        writeLog('autoUpdater: checking for updates...')
+        autoUpdater.checkForUpdates().catch(e => writeLog('checkForUpdates error: ' + e?.message))
+      } catch (e) { writeLog('checkForUpdates threw: ' + e.message) }
+    }, 15000)
+    setInterval(() => {
+      try { autoUpdater.checkForUpdates().catch(() => {}) } catch {}
+    }, 4 * 60 * 60 * 1000)
+  } catch (e) {
+    writeLog('setupAutoUpdater failed: ' + e.message)
+  }
 }
 
 ipcMain.on('renderer-log', (_, msg) => writeLog('[renderer] ' + msg))
