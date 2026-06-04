@@ -68,6 +68,15 @@ ipcMain.handle('state-load', () => cachedAppState)
 ipcMain.handle('state-save', (_, s) => { cachedAppState = s; writeAppState(s) })
 ipcMain.on('state-load-sync', e => { e.returnValue = cachedAppState })
 
+// ── Historique persistant
+const historyPath = path.join(app.getPath('userData'), 'history.json')
+let cachedHistory = []
+try { cachedHistory = JSON.parse(fs.readFileSync(historyPath, 'utf-8')) } catch {}
+function writeHistory(h) { try { fs.writeFileSync(historyPath, JSON.stringify(h)) } catch {} }
+
+ipcMain.handle('history-save', (_, h) => { cachedHistory = h; writeHistory(h) })
+ipcMain.on('history-load-sync', e => { e.returnValue = cachedHistory })
+
 // ── Adblocker (uBlock Origin-style)
 const BL_DIR = app.getPath('userData')
 const BL_VER = 'v6'

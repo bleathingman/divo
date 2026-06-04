@@ -1747,13 +1747,19 @@ function hideContextMenu() { contextMenu.classList.remove('visible'); ctxTargetI
 // ============================================================
 
 function loadHistory() {
-  try { historyData = JSON.parse(localStorage.getItem('arc-history') || '[]') }
-  catch { historyData = [] }
+  try {
+    const h = window.bridge.initHistory
+    historyData = Array.isArray(h) ? h : []
+    // Migration : si history.json est vide mais localStorage a des données
+    if (!historyData.length) {
+      const local = JSON.parse(localStorage.getItem('arc-history') || '[]')
+      if (local.length) { historyData = local; saveHistory() }
+    }
+  } catch { historyData = [] }
 }
 
 function saveHistory() {
-  try { localStorage.setItem('arc-history', JSON.stringify(historyData.slice(0, 300))) }
-  catch {}
+  window.bridge.historySave(historyData.slice(0, 5000)).catch(() => {})
 }
 
 function addToHistory(url, title, favicon) {
@@ -1763,14 +1769,21 @@ function addToHistory(url, title, favicon) {
   saveHistory()
 }
 
-function renderHistory() {
+function renderHistory(filter) {
   const list = document.getElementById('history-list')
-  if (!historyData.length) { list.innerHTML = '<div class="history-empty">Aucun historique</div>'; return }
+  const q = (filter || '').trim().toLowerCase()
+  const items = q
+    ? historyData.filter(h => h.title.toLowerCase().includes(q) || h.url.toLowerCase().includes(q))
+    : historyData
+  if (!items.length) {
+    list.innerHTML = `<div class="history-empty">${q ? 'Aucun résultat' : 'Aucun historique'}</div>`
+    return
+  }
   const frag = document.createDocumentFragment()
   let lastDay = ''
-  for (const item of historyData) {
+  for (const item of items) {
     const d = new Date(item.time); const dayKey = d.toDateString()
-    if (dayKey !== lastDay) {
+    if (dayKey !== lastDay && !q) {
       lastDay = dayKey
       const lbl = document.createElement('div'); lbl.className = 'history-day'
       const today = new Date().toDateString(); const yest = new Date(Date.now() - 86400000).toDateString()
@@ -1793,7 +1806,12 @@ function renderHistory() {
   list.replaceChildren(frag)
 }
 
-function openHistory()   { loadHistory(); renderHistory(); historyPanel.classList.add('visible') }
+function openHistory() {
+  renderHistory()
+  historyPanel.classList.add('visible')
+  document.getElementById('history-search').value = ''
+  setTimeout(() => document.getElementById('history-search').focus(), 50)
+}
 function closeHistory()  { historyPanel.classList.remove('visible') }
 function toggleHistory() { historyPanel.classList.contains('visible') ? closeHistory() : openHistory() }
 
@@ -2082,6 +2100,7 @@ document.getElementById('btn-settings').addEventListener('click', () => {
 document.getElementById('btn-add-space').addEventListener('click', createSpace)
 document.getElementById('history-close').addEventListener('click', closeHistory)
 document.getElementById('history-clear').addEventListener('click', () => { historyData = []; saveHistory(); renderHistory() })
+document.getElementById('history-search').addEventListener('input', e => renderHistory(e.target.value))
 
 window.bridge.onDlStart(d => {
   downloads.set(d.id, { filename: d.filename, received: 0, total: d.total, state: 'progressing', savePath: '' })

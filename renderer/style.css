@@ -1083,6 +1083,24 @@ body.light .default-browser-bar { background: #e8f0fe; border-bottom-color: #4a9
   width: 0
 }
 
+.history-search-wrap {
+  padding: 8px 12px;
+  border-bottom: 1px solid #252527;
+}
+.history-search {
+  width: 100%;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 7px;
+  color: #f5f5f7;
+  font-size: 13px;
+  padding: 6px 10px;
+  outline: none;
+  box-sizing: border-box;
+}
+.history-search::placeholder { color: #636366 }
+.history-search:focus { border-color: #0a84ff; box-shadow: 0 0 0 2px rgba(10,132,255,.25) }
+
 .history-day {
   font-size: 10px;
   font-weight: 600;
@@ -1586,6 +1604,9 @@ body.light #find-count { color: #636366 }
 
 body.light .history-panel { background: #f2f2f7; border-left-color: #d1d1d6 }
 body.light .history-header { border-bottom-color: #d1d1d6 }
+body.light .history-search-wrap { border-bottom-color: #d1d1d6 }
+body.light .history-search { background: #fff; border-color: #d1d1d6; color: #1c1c1e }
+body.light .history-search::placeholder { color: #aeaeb2 }
 body.light .history-title { color: #1c1c1e }
 
 /* ── DOSSIERS FAVORIS ── */
