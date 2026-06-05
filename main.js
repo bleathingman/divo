@@ -116,6 +116,16 @@ function writePasswords(entries) {
 ipcMain.on('passwords-load-sync', e => { e.returnValue = cachedPasswords })
 ipcMain.handle('passwords-save', (_, entries) => { cachedPasswords = entries; writePasswords(entries) })
 
+// ── Aperçu des onglets
+ipcMain.handle('capture-tab', async (_, wcId) => {
+  try {
+    const wc = webContents.fromId(wcId)
+    if (!wc || wc.isDestroyed()) return null
+    const img = await wc.capturePage()
+    return img.resize({ width: 280, quality: 'good' }).toDataURL()
+  } catch { return null }
+})
+
 // ── Sessions nommées
 const sessionsPath = path.join(app.getPath('userData'), 'sessions.json')
 let cachedSessions = []

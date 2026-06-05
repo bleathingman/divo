@@ -1751,6 +1751,69 @@ body.light .pw-cancel-btn { background: #e5e5ea; color: #3a3a3c }
   display: inline-block
 }
 
+/* ── Aperçu des onglets ── */
+.tab-preview {
+  position: fixed;
+  z-index: 8000;
+  width: 240px;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.55);
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-6px);
+  transition: opacity .14s, transform .14s;
+}
+.tab-preview.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+.tab-preview-img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+}
+.tab-preview-placeholder {
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #48484a;
+  font-size: 13px;
+  background: #141416;
+}
+.tab-preview-info {
+  padding: 8px 10px 9px;
+  border-top: 1px solid #2c2c2e;
+}
+.tab-preview-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #e5e5ea;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-preview-url {
+  display: block;
+  font-size: 11px;
+  color: #48484a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+body.light .tab-preview { background: #fff; border-color: #d1d1d6; box-shadow: 0 8px 32px rgba(0,0,0,.15) }
+body.light .tab-preview-info { border-top-color: #e5e5ea }
+body.light .tab-preview-title { color: #1c1c1e }
+body.light .tab-preview-placeholder { background: #f2f2f7; color: #aeaeb2 }
+
 /* ── Color row in context menu ── */
 .ctx-color-row {
   display: flex;

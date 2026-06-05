@@ -270,6 +270,8 @@ let historyData     = []
 let sessionsData    = []
 let passwordsData   = []
 let autofillCred    = null
+const tabPreviewCache = new Map()   // tabId → { url: dataUrl, ts: number }
+let   tabPreviewTimer = null
 let sidebarVisible  = true
 let focusMode       = false
 let downloads       = new Map()
@@ -564,6 +566,8 @@ function wireWebviewEvents(el) {
     isLoading = false; btnReload.innerHTML = ICON_RELOAD; btnReload.title = 'Recharger'
     completeProgress(); updateNavButtons()
     checkAutofill()
+    // Invalider le cache preview pour cet onglet
+    tabPreviewCache.delete(el.__key)
     const url = el.getURL()
     if (isNewtab(url)) {
       const engine = localStorage.getItem('divo-search-engine') || 'google'
@@ -1789,6 +1793,60 @@ async function checkAutofill() {
   } catch {}
 }
 
+// ── Aperçu des onglets
+const tabPreviewEl = document.getElementById('tab-preview')
+
+async function showTabPreview(tabId, anchorEl) {
+  clearTimeout(tabPreviewTimer)
+  tabPreviewTimer = setTimeout(async () => {
+    const tab = tabs.find(t => t.id === tabId)
+    if (!tab) return
+
+    let dataUrl = null
+    const cached = tabPreviewCache.get(tabId)
+    if (cached && Date.now() - cached.ts < 30000) {
+      dataUrl = cached.url
+    } else {
+      const wvEl = pageWebviews.get(tabId)
+      if (wvEl?.__ready) {
+        try {
+          const wcId = wvEl.getWebContentsId()
+          dataUrl = await window.bridge.captureTab(wcId)
+          if (dataUrl) tabPreviewCache.set(tabId, { url: dataUrl, ts: Date.now() })
+        } catch {}
+      }
+    }
+
+    const title = escapeHtml(tab.title || 'Nouvel onglet')
+    const url   = escapeHtml(displayUrl(tab.url))
+    tabPreviewEl.innerHTML = dataUrl
+      ? `<img class="tab-preview-img" src="${dataUrl}" draggable="false">
+         <div class="tab-preview-info"><span class="tab-preview-title">${title}</span><span class="tab-preview-url">${url}</span></div>`
+      : `<div class="tab-preview-placeholder">${tab.unloaded ? '💤 En veille' : '⏳ Chargement…'}</div>
+         <div class="tab-preview-info"><span class="tab-preview-title">${title}</span><span class="tab-preview-url">${url}</span></div>`
+
+    // Positionner à droite de la sidebar
+    const sidebar = document.querySelector('.sidebar')
+    const sRect   = sidebar.getBoundingClientRect()
+    const aRect   = anchorEl.getBoundingClientRect()
+    tabPreviewEl.style.left = (sRect.right + 8) + 'px'
+    tabPreviewEl.style.top  = aRect.top + 'px'
+    tabPreviewEl.classList.add('visible')
+
+    // Ajuster si déborde en bas
+    requestAnimationFrame(() => {
+      const ph  = tabPreviewEl.getBoundingClientRect().height
+      const max = window.innerHeight - ph - 8
+      if (aRect.top > max) tabPreviewEl.style.top = Math.max(8, max) + 'px'
+    })
+  }, 380)
+}
+
+function hideTabPreview() {
+  clearTimeout(tabPreviewTimer)
+  tabPreviewEl.classList.remove('visible')
+}
+
 // ── Emoji picker pour les espaces
 let emojiPickerSpaceId = null
 
@@ -1964,6 +2022,8 @@ function buildTabItem(t) {
     <button class="tab-mute" data-mute="${t.id}" title="${t.muted ? 'Activer le son' : 'Couper le son'}">${t.muted ? ICON_MUTED : ICON_AUDIO}</button>
     <button class="tab-close" data-close="${t.id}">✕</button>
   `
+  li.addEventListener('mouseenter', () => showTabPreview(t.id, li))
+  li.addEventListener('mouseleave', hideTabPreview)
   return li
 }
 
@@ -2489,7 +2549,7 @@ tabsList.addEventListener('click', e => {
     return
   }
   if (closeBtn) { closeTab(closeBtn.dataset.close); return }
-  if (item) { activateTab(item.dataset.id) }
+  if (item) { hideTabPreview(); activateTab(item.dataset.id) }
 })
 tabsList.addEventListener('contextmenu', e => {
   e.preventDefault()

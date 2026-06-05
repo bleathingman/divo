@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('bridge', {
   sessionsSave:   (s) => ipcRenderer.invoke('sessions-save', s),
   initPasswords:  __divoInitPasswords,
   passwordsSave:  (p) => ipcRenderer.invoke('passwords-save', p),
+  captureTab:     (id) => ipcRenderer.invoke('capture-tab', id),
   stateSave: (s)   => ipcRenderer.invoke('state-save', s),
   rendererLog: (msg) => ipcRenderer.send('renderer-log', msg),
 })
