@@ -48,7 +48,7 @@ const ADBLOCK_NEVER_BLOCK = new Set([
 const WEBVIEW_SHORTCUTS = new Set([
   'ctrl+KeyT', 'ctrl+shift+KeyT', 'ctrl+shift+KeyN', 'ctrl+KeyW',
   'ctrl+KeyL', 'ctrl+KeyR', 'ctrl+shift+KeyR', 'ctrl+KeyF',
-  'ctrl+KeyH', 'ctrl+KeyB', 'ctrl+KeyD', 'ctrl+KeyK', 'ctrl+Tab', 'ctrl+shift+Tab',
+  'ctrl+KeyH', 'ctrl+KeyB', 'ctrl+KeyD', 'ctrl+KeyK', 'ctrl+Backslash', 'ctrl+Tab', 'ctrl+shift+Tab',
   'ctrl+Equal', 'ctrl+NumpadAdd', 'ctrl+Minus', 'ctrl+NumpadSubtract',
   'ctrl+Digit0', 'ctrl+Numpad0',
   'alt+ArrowLeft', 'alt+ArrowRight',
