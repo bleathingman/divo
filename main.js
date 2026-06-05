@@ -336,8 +336,9 @@ async function setupChromeWebStore() {
   // Polyfill injecté dans tous les service workers d'extensions (chrome.storage.sync, session, scripting)
   const swPolyfillPath = path.join(__dirname, 'ext-sw-polyfill.js')
   for (const s of getProtectedSessions()) {
-    try { s.registerPreloadScript({ id: `divo-sw-${s.partition||'d'}`,    type: 'service-worker', filePath: swPolyfillPath }) } catch (e) { console.warn('[ext] registerPreloadScript SW:', e.message) }
-    try { s.registerPreloadScript({ id: `divo-fr-${s.partition||'d'}`,    type: 'frame',          filePath: swPolyfillPath }) } catch (e) { console.warn('[ext] registerPreloadScript frame:', e.message) }
+    try { s.registerPreloadScript({ id: `divo-sw-${s.partition||'d'}`, type: 'service-worker', filePath: swPolyfillPath }) } catch (e) { console.warn('[ext] registerPreloadScript SW:', e.message) }
+    // 'frame' retiré : injectait le polyfill dans les sandboxed iframes (ex: YouTube),
+    // causant "Blocked script execution in about:blank because sandboxed"
   }
 
   try {
@@ -691,7 +692,24 @@ function adblockHandler(details, callback) {
 
 function setupCsp() {
   for (const s of getProtectedSessions()) {
-    s.webRequest.onHeadersReceived({ urls: ['divo://*/*'] }, cspHandler)
+    s.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
+      const url = details.url || ''
+      if (url.startsWith('divo://')) {
+        // Nos pages internes : CSP stricte
+        return cspHandler(details, callback)
+      }
+      // Pages externes : retirer require-trusted-types-for pour que les content scripts
+      // d'extensions puissent injecter des scripts (ex: bloqueurs de pubs sur YouTube)
+      const headers = { ...details.responseHeaders }
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === 'content-security-policy') {
+          headers[key] = headers[key].map(v =>
+            v.replace(/require-trusted-types-for\s+'script'\s*;?\s*/gi, '')
+          )
+        }
+      }
+      callback({ responseHeaders: headers })
+    })
   }
 }
 
