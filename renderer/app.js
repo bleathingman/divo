@@ -287,6 +287,7 @@ let readerActive    = false
 let readerFontSize  = 18
 let mediaTabId        = null   // onglet qui joue actuellement
 let mediaEssentialId  = null   // essential qui joue actuellement
+let splitActive       = false  // vue fractionnée active
 let pendingPermKey  = null
 
 // Pool de webviews — une par onglet/essential, max MAX_POOL vivantes simultanément
@@ -535,7 +536,7 @@ function allocWebview(key) {
   el.__key   = key
   el.__ready = false
   el.style.display = 'none'
-  document.querySelector('.content').appendChild(el)
+  document.getElementById('wv-wrap').appendChild(el)
   wireWebviewEvents(el)
   pageWebviews.set(key, el)
   return el
@@ -929,7 +930,11 @@ function navigate(url, preserveContent = false) {
   if (!key) { saveState(); return }
 
   // Afficher uniquement le webview de cet onglet, cacher tous les autres
-  for (const [k, v] of pageWebviews) v.style.display = k === key ? '' : 'none'
+  for (const [k, v] of pageWebviews) {
+    const active = k === key
+    v.style.display = active ? '' : 'none'
+    v.classList.toggle('split-left', active && splitActive)
+  }
 
   const wvEl = pageWebviews.get(key)
   if (wvEl) {
@@ -948,6 +953,7 @@ function navigate(url, preserveContent = false) {
   // Pas encore dans le pool — allouer et charger
   const newWv = allocWebview(key)
   newWv.style.display = ''
+  if (splitActive) newWv.classList.add('split-left')
   webviewReady = false
   newWv.src = url
   saveState()
@@ -2502,6 +2508,7 @@ function handleShortcut(mod, shift, alt, code) {
   if (mod && code === 'KeyK') { openPalette(); return true }
   if (mod && code === 'KeyH') { toggleHistory(); return true }
   if (mod && code === 'KeyB') { toggleSidebar(); return true }
+  if (mod && code === 'Backslash') { toggleSplit(); return true }
   if (mod && code === 'KeyD') { addCurrentPageAsEssential(); return true }
   if (code === 'F3')  { openFind(); return true }
   if (code === 'F5')  { if (webviewReady) wv().reload(); return true }
@@ -2794,6 +2801,7 @@ btnMute.addEventListener('click', () => {
 })
 
 document.getElementById('btn-toggle-sidebar').addEventListener('click', toggleSidebar)
+document.getElementById('btn-split').addEventListener('click', toggleSplit)
 document.getElementById('btn-focus-mode').addEventListener('click', toggleFocusMode)
 document.getElementById('btn-new-private').addEventListener('click', () => createTab(null, true))
 document.getElementById('btn-downloads').addEventListener('click', () => {
@@ -2981,6 +2989,75 @@ essentialsList.addEventListener('dragend', () => { essentialsList.classList.remo
 
 
 // ============================================================
+// SPLIT VIEW
+// ============================================================
+
+function toggleSplit() {
+  splitActive = !splitActive
+  document.body.classList.toggle('split-active', splitActive)
+  document.getElementById('btn-split').classList.toggle('active', splitActive)
+
+  const key = activeEssentialId || activeTabId
+  for (const [k, v] of pageWebviews) {
+    const active = k === key
+    v.classList.toggle('split-left', active && splitActive)
+    if (!splitActive) v.classList.remove('split-left')
+  }
+
+  if (splitActive) {
+    const sv = document.getElementById('split-wv')
+    if (!sv.__splitInit) {
+      sv.__splitInit = true
+      sv.src = NEWTAB_URL
+    }
+    const cur = (() => { try { return sv.getURL() } catch { return '' } })()
+    document.getElementById('split-url').value = cur ? displayUrl(cur) : ''
+  }
+}
+
+;(function wireSplitNav() {
+  const sv      = document.getElementById('split-wv')
+  const urlInp  = document.getElementById('split-url')
+  const btnBack = document.getElementById('split-btn-back')
+  const btnFwd  = document.getElementById('split-btn-fwd')
+  const btnRel  = document.getElementById('split-btn-reload')
+  const btnCls  = document.getElementById('split-close')
+
+  sv.addEventListener('dom-ready', () => {
+    sv.__ready = true
+    if (splitActive) urlInp.value = displayUrl(sv.getURL() || '')
+  })
+  sv.addEventListener('did-navigate', e => {
+    if (splitActive) urlInp.value = displayUrl(e.url)
+  })
+  sv.addEventListener('did-navigate-in-page', e => {
+    if (splitActive && e.isMainFrame) urlInp.value = displayUrl(e.url)
+  })
+  sv.addEventListener('new-window', e => { e.preventDefault(); if (e.url) createTab(e.url) })
+
+  btnBack.addEventListener('click', () => { try { if (sv.__ready && sv.canGoBack())    sv.goBack()    } catch {} })
+  btnFwd.addEventListener('click',  () => { try { if (sv.__ready && sv.canGoForward()) sv.goForward() } catch {} })
+  btnRel.addEventListener('click',  () => { try { if (sv.__ready) sv.reload()          } catch {} })
+  btnCls.addEventListener('click',  () => { if (splitActive) toggleSplit() })
+
+  urlInp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const url = normalizeUrl(urlInp.value.trim())
+      urlInp.value = displayUrl(url)
+      try {
+        if (sv.__ready) sv.loadURL(url).catch(() => {})
+        else sv.src = url
+      } catch { sv.src = url }
+    }
+    if (e.key === 'Escape') {
+      urlInp.blur()
+      try { urlInp.value = displayUrl(sv.getURL() || '') } catch {}
+    }
+  })
+  urlInp.addEventListener('focus', () => urlInp.select())
+})()
+
+// ============================================================
 // ÉVÉNEMENTS — WEBVIEW (gérés via wireWebviewEvents par le pool)
 // ============================================================
 
@@ -3154,6 +3231,7 @@ favoritesList.addEventListener('drop', e => {
     { type:'action', title:'Fermer l\'onglet',           icon:'close-tab',  kbd:'Ctrl+W',   run:() => { if (activeTabId && !activeEssentialId) closeTab(activeTabId) } },
     { type:'action', title:'Plein écran',                icon:'fullscreen', kbd:'F11',      run:() => window.bridge.toggleFullscreen() },
     { type:'action', title:'Afficher / masquer sidebar', icon:'sidebar',    kbd:'Ctrl+B',   run:() => toggleSidebar() },
+    { type:'action', title:'Vue fractionnée',           icon:'split',      kbd:'Ctrl+\\',  run:() => toggleSplit() },
     { type:'action', title:'Mode focus',                 icon:'focus',      kbd:'F8',       run:() => toggleFocusMode() },
     { type:'action', title:'Outils développeur',         icon:'devtools',   kbd:'F12',      run:() => { if (webviewReady) wv().openDevTools() } },
     { type:'action', title:'Épingler en Essential',      icon:'pin',        kbd:'Ctrl+D',   run:() => addCurrentPageAsEssential() },
