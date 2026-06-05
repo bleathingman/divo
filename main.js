@@ -1836,3 +1836,61 @@ ipcMain.handle('import-chrome-bookmarks', async () => {
   }
   return result
 })
+
+// ── Export / Import profil
+ipcMain.handle('profile-export', async () => {
+  const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Exporter le profil Divo',
+    defaultPath: `divo-profile-${new Date().toISOString().slice(0,10)}.divo-profile`,
+    filters: [{ name: 'Profil Divo', extensions: ['divo-profile'] }],
+  })
+  if (canceled || !filePath) return { ok: false }
+  try {
+    const profile = {
+      app: 'Divo',
+      version: '3.0.0',
+      exportedAt: new Date().toISOString(),
+      state:    cachedAppState || null,
+      history:  cachedHistory  || [],
+      config:   { ...config },
+      sessions: cachedSessions || [],
+    }
+    fs.writeFileSync(filePath, JSON.stringify(profile, null, 2), 'utf-8')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e.message }
+  }
+})
+
+ipcMain.handle('profile-import', async () => {
+  const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Importer un profil Divo',
+    filters: [{ name: 'Profil Divo', extensions: ['divo-profile'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || !filePaths.length) return { ok: false }
+  try {
+    const raw = fs.readFileSync(filePaths[0], 'utf-8')
+    const profile = JSON.parse(raw)
+    if (profile.app !== 'Divo') return { ok: false, error: 'Fichier invalide' }
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'Importer le profil',
+      message: 'Cette action remplacera vos données actuelles.',
+      detail: `Profil exporté le ${new Date(profile.exportedAt).toLocaleString('fr-FR')}.\nVos onglets, favoris, espaces, historique et sessions actuels seront remplacés.`,
+      buttons: ['Annuler', 'Importer et redémarrer'],
+      defaultId: 0,
+      cancelId: 0,
+    })
+    if (response !== 1) return { ok: false }
+    if (profile.state)    { cachedAppState = profile.state;    writeAppState(profile.state) }
+    if (profile.history)  { cachedHistory  = profile.history;  writeHistory(profile.history) }
+    if (profile.sessions) { cachedSessions = profile.sessions; writeSessions(profile.sessions) }
+    if (profile.config)   { Object.assign(config, profile.config); saveConfig() }
+    app.relaunch()
+    app.exit(0)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e.message }
+  }
+})

@@ -818,6 +818,22 @@ function wireWebviewEvents(el) {
       if (pendingUpdate) updateInstallBtn.click()
       return
     }
+    if (e.title === 'divo-settings-action:export-profile' && isSettings(currentUrl)) {
+      window.bridge.exportProfile().then(res => {
+        if (!res.ok || !el.__ready) return
+        el.executeJavaScript(`(function(){
+          const b = document.getElementById('btn-export-profile')
+          if (!b) return
+          const old = b.textContent; b.textContent = '✓ Exporté'; b.disabled = true
+          setTimeout(() => { b.textContent = old; b.disabled = false }, 2000)
+        })()`).catch(() => {})
+      })
+      return
+    }
+    if (e.title === 'divo-settings-action:import-profile' && isSettings(currentUrl)) {
+      window.bridge.importProfile()
+      return
+    }
     if (e.title.startsWith('divo-settings:')) {
       if (!isSpecial(currentUrl)) return
       try {

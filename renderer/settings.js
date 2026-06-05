@@ -53,6 +53,13 @@ document.getElementById('update-action-btn').addEventListener('click', function(
 })
 
 ;(function() {
+  document.getElementById('btn-export-profile').addEventListener('click', function() {
+    document.title = 'divo-settings-action:export-profile'
+  })
+  document.getElementById('btn-import-profile').addEventListener('click', function() {
+    document.title = 'divo-settings-action:import-profile'
+  })
+
   let clicks = 0, timer = null
   document.getElementById('secret-trigger').addEventListener('click', () => {
     clicks++
