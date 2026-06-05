@@ -2241,6 +2241,7 @@ function renderHistory(filter) {
 }
 
 function openHistory() {
+  closeSessions(); closePasswordsPanel()
   renderHistory()
   historyPanel.classList.add('visible')
   document.getElementById('history-search').value = ''
@@ -2350,6 +2351,7 @@ function renderSessions() {
 }
 
 function openSessions() {
+  closeHistory(); closePasswordsPanel()
   renderSessions()
   sessionsPanel.classList.add('visible')
   document.getElementById('sessions-save-form').style.display = 'none'
@@ -2518,7 +2520,9 @@ function handleShortcut(mod, shift, alt, code) {
     if (readerActive) { closeReader(); return true }
     if (permBar.classList.contains('visible'))    { permBar.classList.remove('visible'); return true }
     if (findBar.classList.contains('visible'))    { closeFind();   return true }
-    if (historyPanel.classList.contains('visible')) { closeHistory(); return true }
+    if (historyPanel.classList.contains('visible'))   { closeHistory();        return true }
+    if (sessionsPanel.classList.contains('visible'))  { closeSessions();       return true }
+    if (passwordsPanel.classList.contains('visible')) { closePasswordsPanel(); return true }
     if (document.activeElement === urlInput || document.activeElement === topUrlInput) { document.activeElement.blur(); return true }
     if (isLoading && webviewReady) { wv().stop(); return true }
   }
@@ -2656,6 +2660,18 @@ document.getElementById('btn-settings').addEventListener('click', () => {
   }
 })
 document.getElementById('btn-add-space').addEventListener('click', createSpace)
+// Fermer les panels au clic extérieur (capture → avant tous les autres handlers)
+document.addEventListener('mousedown', e => {
+  if (historyPanel.classList.contains('visible') && !historyPanel.contains(e.target))
+    closeHistory()
+  if (sessionsPanel.classList.contains('visible') && !sessionsPanel.contains(e.target)
+      && !document.getElementById('btn-sessions')?.contains(e.target))
+    closeSessions()
+  if (passwordsPanel.classList.contains('visible') && !passwordsPanel.contains(e.target)
+      && !document.getElementById('btn-passwords')?.contains(e.target))
+    closePasswordsPanel()
+}, true)
+
 document.getElementById('history-close').addEventListener('click', closeHistory)
 document.getElementById('history-clear').addEventListener('click', () => { historyData = []; saveHistory(); renderHistory() })
 document.getElementById('history-search').addEventListener('input', e => renderHistory(e.target.value))
