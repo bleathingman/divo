@@ -24,8 +24,9 @@ const SETTINGS_URL = window.bridge.settingsUrl
 const webview = document.getElementById('webview')
 
 // SEC-307 — fallback favicon : masque les <img> cassées sans onerror inline (bloqué par CSP)
+// Les .ess-icon img sont exemptées : elles ont leur propre fallback ci-dessous
 document.addEventListener('error', e => {
-  if (e.target.tagName === 'IMG') e.target.style.display = 'none'
+  if (e.target.tagName === 'IMG' && !e.target.closest('.ess-icon')) e.target.style.display = 'none'
 }, true)
 const updateBar           = document.getElementById('update-bar')
 const updateMsg           = document.getElementById('update-msg')
@@ -1230,7 +1231,11 @@ function addCurrentPageAsEssential() {
 
 function unloadEssential(id) {
   if (activeEssentialId !== id) return
-  activeEssentialId = null
+  // Arrêter la lecture media (YouTube, etc.)
+  const wvEl = pageWebviews.get(id)
+  if (wvEl) { try { wvEl.src = 'about:blank' } catch {} }
+  if (mediaEssentialId === id) { mediaEssentialId = null; updateMiniPlayer() }
+  // Ne PAS null activeEssentialId ici → activateTab verra wasEssential=true → renderEssentials() s'exécute
   const at = getActiveTabs()
   at.length ? activateTab(at[0].id) : createTab()
 }
@@ -1995,11 +2000,32 @@ function renderEssentials() {
     if (fav) {
       const img = document.createElement('img')
       img.src = fav; img.loading = 'lazy'; img.draggable = false
+      img.addEventListener('error', () => {
+        try {
+          const fb = `https://www.google.com/s2/favicons?domain=${new URL(e.url).hostname}&sz=32`
+          if (img.src !== fb) { img.src = fb; return }
+        } catch {}
+        img.style.display = 'none'
+        const ph = document.createElement('div'); ph.className = 'ess-placeholder'
+        btn.insertBefore(ph, img)
+      }, { once: true })
       btn.appendChild(img)
     } else {
-      const ph = document.createElement('div')
-      ph.className = 'ess-placeholder'
-      btn.appendChild(ph)
+      try {
+        const fb = `https://www.google.com/s2/favicons?domain=${new URL(e.url).hostname}&sz=32`
+        const img = document.createElement('img')
+        img.src = fb; img.loading = 'lazy'; img.draggable = false
+        img.addEventListener('error', () => {
+          img.style.display = 'none'
+          const ph = document.createElement('div'); ph.className = 'ess-placeholder'
+          btn.insertBefore(ph, img)
+        }, { once: true })
+        btn.appendChild(img)
+      } catch {
+        const ph = document.createElement('div')
+        ph.className = 'ess-placeholder'
+        btn.appendChild(ph)
+      }
     }
     const rm = document.createElement('button')
     rm.className = 'ess-remove'
