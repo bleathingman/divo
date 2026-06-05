@@ -24,9 +24,11 @@ const SETTINGS_URL = window.bridge.settingsUrl
 const webview = document.getElementById('webview')
 
 // SEC-307 — fallback favicon : masque les <img> cassées sans onerror inline (bloqué par CSP)
-// Les .ess-icon img sont exemptées : elles ont leur propre fallback ci-dessous
+// Exemptions : .ess-icon (fallback Google), #mini-player-favicon et .split-favicon (gérés par JS)
 document.addEventListener('error', e => {
-  if (e.target.tagName === 'IMG' && !e.target.closest('.ess-icon')) e.target.style.display = 'none'
+  if (e.target.tagName !== 'IMG') return
+  if (e.target.closest('.ess-icon') || e.target.id === 'mini-player-favicon' || e.target.classList.contains('split-favicon')) return
+  e.target.style.display = 'none'
 }, true)
 const updateBar           = document.getElementById('update-bar')
 const updateMsg           = document.getElementById('update-msg')
@@ -710,6 +712,8 @@ function wireWebviewEvents(el) {
     if (!e.isMainFrame) return
     const tab = tabs.find(t => t.id === el.__key)
     if (tab) { tab.url = e.url; saveState() }
+    const ess = essentials.find(x => x.id === el.__key)
+    if (ess && !isSpecial(e.url)) { ess.url = e.url; saveState() }
     if (el !== wv()) return
     syncUrlBars(displayUrl(e.url))
     updateNavButtons()
@@ -930,11 +934,7 @@ function navigate(url, preserveContent = false) {
   if (!key) { saveState(); return }
 
   // Afficher uniquement le webview de cet onglet, cacher tous les autres
-  for (const [k, v] of pageWebviews) {
-    const active = k === key
-    v.style.display = active ? '' : 'none'
-    v.classList.toggle('split-left', active && splitActive)
-  }
+  for (const [k, v] of pageWebviews) v.style.display = k === key ? '' : 'none'
 
   const wvEl = pageWebviews.get(key)
   if (wvEl) {
@@ -953,7 +953,6 @@ function navigate(url, preserveContent = false) {
   // Pas encore dans le pool — allouer et charger
   const newWv = allocWebview(key)
   newWv.style.display = ''
-  if (splitActive) newWv.classList.add('split-left')
   webviewReady = false
   newWv.src = url
   saveState()
@@ -1055,8 +1054,12 @@ function updateMiniPlayer() {
   if (key === activeEssentialId || key === activeTabId) { miniPlayer.classList.remove('visible'); return }
   const item = essentials.find(e => e.id === key) || tabs.find(t => t.id === key)
   if (!item) { miniPlayer.classList.remove('visible'); return }
-  miniPlayerFav.src = safeFavicon(item.favicon)
-  miniPlayerFav.style.display = safeFavicon(item.favicon) ? '' : 'none'
+  const mpFav = safeFavicon(item.favicon)
+  miniPlayerFav.style.display = mpFav ? '' : 'none'
+  if (mpFav) {
+    miniPlayerFav.src = mpFav
+    miniPlayerFav.onerror = () => { miniPlayerFav.style.display = 'none'; miniPlayerFav.onerror = null }
+  }
   miniPlayerTitle.textContent = item.title || 'En cours de lecture'
   miniPlayer.dataset.playKey = key
   miniPlayer.classList.add('visible')
@@ -2997,13 +3000,6 @@ function toggleSplit() {
   document.body.classList.toggle('split-active', splitActive)
   document.getElementById('btn-split').classList.toggle('active', splitActive)
 
-  const key = activeEssentialId || activeTabId
-  for (const [k, v] of pageWebviews) {
-    const active = k === key
-    v.classList.toggle('split-left', active && splitActive)
-    if (!splitActive) v.classList.remove('split-left')
-  }
-
   if (splitActive) {
     const sv = document.getElementById('split-wv')
     if (!sv.__splitInit) {
@@ -3018,13 +3014,32 @@ function toggleSplit() {
 ;(function wireSplitNav() {
   const sv      = document.getElementById('split-wv')
   const urlInp  = document.getElementById('split-url')
+  const favImg  = document.getElementById('split-favicon')
   const btnBack = document.getElementById('split-btn-back')
   const btnFwd  = document.getElementById('split-btn-fwd')
   const btnRel  = document.getElementById('split-btn-reload')
   const btnCls  = document.getElementById('split-close')
 
+  function setSplitFavicon(url) {
+    const f = safeFavicon(url)
+    if (f) {
+      favImg.src = f
+      favImg.classList.add('shown')
+      favImg.onerror = () => { favImg.classList.remove('shown'); favImg.onerror = null }
+    } else {
+      favImg.classList.remove('shown')
+    }
+  }
+
   sv.addEventListener('dom-ready', () => {
     sv.__ready = true
+    if (splitActive) urlInp.value = displayUrl(sv.getURL() || '')
+  })
+  sv.addEventListener('did-start-loading', () => {
+    btnRel.innerHTML = ICON_STOP; btnRel.title = 'Arrêter'
+  })
+  sv.addEventListener('did-stop-loading', () => {
+    btnRel.innerHTML = ICON_RELOAD; btnRel.title = 'Recharger'
     if (splitActive) urlInp.value = displayUrl(sv.getURL() || '')
   })
   sv.addEventListener('did-navigate', e => {
@@ -3033,25 +3048,39 @@ function toggleSplit() {
   sv.addEventListener('did-navigate-in-page', e => {
     if (splitActive && e.isMainFrame) urlInp.value = displayUrl(e.url)
   })
+  sv.addEventListener('page-favicon-updated', e => {
+    const favs = e.favicons
+    if (!favs?.length) return
+    const fav = favs.find(u => /\.(png|ico|jpg|svg)(\?|$)/i.test(u)) || favs[0]
+    setSplitFavicon(fav)
+  })
   sv.addEventListener('new-window', e => { e.preventDefault(); if (e.url) createTab(e.url) })
 
   btnBack.addEventListener('click', () => { try { if (sv.__ready && sv.canGoBack())    sv.goBack()    } catch {} })
   btnFwd.addEventListener('click',  () => { try { if (sv.__ready && sv.canGoForward()) sv.goForward() } catch {} })
-  btnRel.addEventListener('click',  () => { try { if (sv.__ready) sv.reload()          } catch {} })
+  btnRel.addEventListener('click',  () => {
+    try {
+      if (btnRel.title === 'Arrêter') { sv.stop(); btnRel.innerHTML = ICON_RELOAD; btnRel.title = 'Recharger' }
+      else if (sv.__ready) sv.reload()
+    } catch {}
+  })
   btnCls.addEventListener('click',  () => { if (splitActive) toggleSplit() })
 
   urlInp.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       const url = normalizeUrl(urlInp.value.trim())
       urlInp.value = displayUrl(url)
+      favImg.classList.remove('shown')
       try {
         if (sv.__ready) sv.loadURL(url).catch(() => {})
         else sv.src = url
       } catch { sv.src = url }
+      try { window.bridge.focusWebview(sv.getWebContentsId()) } catch {}
     }
     if (e.key === 'Escape') {
-      urlInp.blur()
       try { urlInp.value = displayUrl(sv.getURL() || '') } catch {}
+      urlInp.blur()
+      try { window.bridge.focusWebview(sv.getWebContentsId()) } catch {}
     }
   })
   urlInp.addEventListener('focus', () => urlInp.select())
