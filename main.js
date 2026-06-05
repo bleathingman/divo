@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dialog, net } = require('electron')
+const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dialog, net, Notification: ElectronNotification } = require('electron')
 const path = require('path')
 const fs   = require('fs')
 const { spawn } = require('child_process')
@@ -124,6 +124,19 @@ ipcMain.handle('capture-tab', async (_, wcId) => {
     const img = await wc.capturePage()
     return img.resize({ width: 280, quality: 'good' }).toDataURL()
   } catch { return null }
+})
+
+ipcMain.on('divo-notification', (event, { title, body }) => {
+  try {
+    if (!ElectronNotification.isSupported()) return
+    const n = new ElectronNotification({ title: String(title || ''), body: String(body || '') })
+    const wcId = event.sender.id
+    n.on('click', () => {
+      try { mainWindow.show(); mainWindow.focus() } catch {}
+      mainWindow.webContents.send('notification-click', wcId)
+    })
+    n.show()
+  } catch {}
 })
 
 // ── Sessions nommées
@@ -1431,6 +1444,7 @@ app.whenReady().then(async () => {
   // Accordées silencieusement (tous les navigateurs font pareil)
   const PERM_AUTO_ALLOW = new Set([
     'fullscreen', 'pointerLock',
+    'notifications',
     'clipboard-sanitized-write',
     'storage-access',
     'top-level-storage-access',
