@@ -2190,7 +2190,7 @@ function buildContextMenu(type) {
     return
   }
   let essCurrentUrl = null
-  try { const essWv = pageWebviews.get(ctxTargetId); if (essWv) essCurrentUrl = essWv.getURL() } catch {}
+  try { const activeWv = wv(); if (activeWv) essCurrentUrl = activeWv.getURL() } catch {}
   const canUpdateUrl = essCurrentUrl && !isSpecial(essCurrentUrl)
   contextMenu.innerHTML = `
     <button class="ctx-item" data-action="rename">${ICO.rename} Renommer</button>
@@ -2662,10 +2662,9 @@ contextMenu.addEventListener('click', e => {
     case 'open-tab':         openEssentialInTab(targetId); break
     case 'update-essential-url': {
       const ess = essentials.find(e => e.id === targetId)
-      const ev  = pageWebviews.get(targetId)
-      if (ess && ev) {
+      if (ess) {
         try {
-          const newUrl = ev.getURL()
+          const newUrl = wv()?.getURL()
           if (newUrl && !isSpecial(newUrl)) { ess.url = newUrl; saveState(); renderEssentials() }
         } catch {}
       }
