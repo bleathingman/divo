@@ -143,6 +143,7 @@ const ICO = {
   close:    `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
   folder:   `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
   folderUp: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="12 12 12 8"></polyline><polyline points="10 10 12 8 14 10"></polyline></svg>`,
+  url:      `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
 }
 
 const SPACE_COLORS = ['#0a84ff', '#34c759', '#ff9f0a', '#bf5af2', '#ff453a', '#ff6b35', '#30d158', '#64d2ff']
@@ -572,6 +573,7 @@ function wireWebviewEvents(el) {
     checkAutofill()
     // Invalider le cache preview pour cet onglet
     tabPreviewCache.delete(el.__key)
+    if (!el.__ready) return
     const url = el.getURL()
     if (isNewtab(url)) {
       const engine = localStorage.getItem('divo-search-engine') || 'google'
