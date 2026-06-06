@@ -57,7 +57,8 @@ const WEBVIEW_SHORTCUTS = new Set([
 
 // ── Profils
 const PROFILES_DIR   = path.join(app.getPath('userData'), 'profiles')
-const PROFILES_INDEX = path.join(app.getPath('userData'), 'profiles.json')
+const PROFILES_INDEX      = path.join(app.getPath('userData'), 'profiles.json')
+const LAUNCH_PROFILE_FILE = path.join(app.getPath('userData'), '.launch-profile')
 let profilesIndex   = { lastUsedId: null, profiles: [] }
 let activeProfileId = null
 let pendingProfileSelectResolve = null
@@ -261,6 +262,11 @@ async function showProfileSelectorWindow() {
 ipcMain.handle('ps-get-data', () => ({ profiles: profilesIndex.profiles, isFirstRun: profilesIndex.profiles.length === 0 }))
 
 ipcMain.handle('ps-select', (_, id) => {
+  if (mainWindow) {
+    try { fs.writeFileSync(LAUNCH_PROFILE_FILE, id) } catch {}
+    app.relaunch(); app.exit(0)
+    return { ok: true }
+  }
   loadProfileData(id)
   const r = pendingProfileSelectResolve; pendingProfileSelectResolve = null
   setImmediate(() => { if (profileSelectorWin && !profileSelectorWin.isDestroyed()) profileSelectorWin.close() })
@@ -273,6 +279,12 @@ ipcMain.handle('ps-create', (_, data) => {
   try { fs.mkdirSync(profileDir(id), { recursive: true }) } catch {}
   profilesIndex.profiles.push({ id, name: data.name||'Profil', emoji: data.emoji||'\u{1F3E0}', image: data.image||null, color: data.color||'#0a84ff' })
   if (data.presetKey) { const st = makePresetState(data.presetKey); if (st) try { fs.writeFileSync(path.join(profileDir(id),'state.json'), JSON.stringify(st)) } catch {} }
+  if (mainWindow) {
+    saveProfilesIndex()
+    try { fs.writeFileSync(LAUNCH_PROFILE_FILE, id) } catch {}
+    app.relaunch(); app.exit(0)
+    return { ok: true }
+  }
   loadProfileData(id)
   const r = pendingProfileSelectResolve; pendingProfileSelectResolve = null
   setImmediate(() => { if (profileSelectorWin && !profileSelectorWin.isDestroyed()) profileSelectorWin.close() })
@@ -299,10 +311,27 @@ ipcMain.handle('ps-delete', (_, id) => {
   return { ok: true }
 })
 
-ipcMain.handle('ps-close',            () => { app.quit() })
+ipcMain.handle('ps-close',            () => {
+  if (mainWindow) { if (profileSelectorWin && !profileSelectorWin.isDestroyed()) profileSelectorWin.close() }
+  else app.quit()
+})
 ipcMain.handle('get-active-profile',  () => profilesIndex.profiles.find(p => p.id === activeProfileId) || null)
 ipcMain.handle('get-all-profiles',    () => profilesIndex.profiles)
-ipcMain.handle('switch-profile',      () => { app.relaunch(); app.exit(0) })
+ipcMain.handle('switch-profile',      () => {
+  profileSelectorWin = new BrowserWindow({
+    width: 380, height: 540,
+    frame: false, resizable: false, center: true,
+    title: 'Divo — Profil',
+    icon: path.join(__dirname, 'assets', 'icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-profile.js'),
+      contextIsolation: true,
+      sandbox: true,
+    }
+  })
+  profileSelectorWin.loadFile(path.join(__dirname, 'renderer', 'profile-selector.html'))
+  profileSelectorWin.on('closed', () => { profileSelectorWin = null })
+})
 ipcMain.handle('edit-active-profile', (_, data) => {
   const p = profilesIndex.profiles.find(x => x.id === activeProfileId); if (!p) return { ok: false }
   if (data.name  !== undefined) p.name  = data.name
@@ -1801,8 +1830,13 @@ app.whenReady().then(async () => {
   })
 
   // ── Démarrage avec sélecteur de profils
-  const isFirstRun = initProfiles()
-  if (isFirstRun || profilesIndex.profiles.length === 0) {
+  initProfiles()
+  let launchProfileId = null
+  try { launchProfileId = fs.readFileSync(LAUNCH_PROFILE_FILE, 'utf-8').trim(); fs.unlinkSync(LAUNCH_PROFILE_FILE) } catch {}
+  if (launchProfileId) {
+    const lp = profilesIndex.profiles.find(x => x.id === launchProfileId)
+    if (lp) { loadProfileData(lp.id) } else { await showProfileSelectorWindow() }
+  } else if (profilesIndex.profiles.length === 0) {
     await showProfileSelectorWindow()
   } else if (profilesIndex.profiles.length === 1) {
     loadProfileData(profilesIndex.profiles[0].id)
