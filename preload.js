@@ -59,6 +59,10 @@ contextBridge.exposeInMainWorld('bridge', {
   onNotificationClick: (cb) => ipcRenderer.on('notification-click', (_, wcId) => cb(wcId)),
   stateSave: (s)   => ipcRenderer.invoke('state-save', s),
   rendererLog: (msg) => ipcRenderer.send('renderer-log', msg),
-  exportProfile: () => ipcRenderer.invoke('profile-export'),
-  importProfile: () => ipcRenderer.invoke('profile-import'),
+  exportProfile:      () => ipcRenderer.invoke('profile-export'),
+  importProfile:      () => ipcRenderer.invoke('profile-import'),
+  getActiveProfile:   () => ipcRenderer.invoke('get-active-profile'),
+  getAllProfiles:      () => ipcRenderer.invoke('get-all-profiles'),
+  switchProfile:      () => ipcRenderer.invoke('switch-profile'),
+  editActiveProfile:  (d) => ipcRenderer.invoke('edit-active-profile', d),
 })

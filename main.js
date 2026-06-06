@@ -55,17 +55,26 @@ const WEBVIEW_SHORTCUTS = new Set([
   'F3', 'F5', 'F11', 'Escape'
 ])
 
-// ── Config persistante
-const configPath = path.join(app.getPath('userData'), 'config.json')
-let config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
-try { Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8'))) } catch {}
-function saveConfig() { try { fs.writeFileSync(configPath, JSON.stringify(config)) } catch (e) { console.error('saveConfig error', e) } }
+// ── Profils
+const PROFILES_DIR   = path.join(app.getPath('userData'), 'profiles')
+const PROFILES_INDEX = path.join(app.getPath('userData'), 'profiles.json')
+let profilesIndex   = { lastUsedId: null, profiles: [] }
+let activeProfileId = null
+let pendingProfileSelectResolve = null
+let profileSelectorWin = null
 
-// ── État navigateur persistant (essentials, favoris, onglets, espaces)
-const statePath = path.join(app.getPath('userData'), 'state.json')
+function profileDir(id) { return path.join(PROFILES_DIR, id || activeProfileId) }
+function saveProfilesIndex() { try { fs.writeFileSync(PROFILES_INDEX, JSON.stringify(profilesIndex)) } catch {} }
+
+// ── Config persistante (par profil)
+let config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
+function saveConfig() {
+  try { fs.writeFileSync(path.join(profileDir(), 'config.json'), JSON.stringify(config)) } catch (e) { console.error('saveConfig error', e) }
+}
+
+// ── État navigateur persistant (par profil)
 let cachedAppState = null
-try { cachedAppState = JSON.parse(fs.readFileSync(statePath, 'utf-8')) } catch {}
-function writeAppState(s) { try { fs.writeFileSync(statePath, JSON.stringify(s)) } catch {} }
+function writeAppState(s) { try { fs.writeFileSync(path.join(profileDir(), 'state.json'), JSON.stringify(s)) } catch {} }
 
 ipcMain.handle('state-load', () => cachedAppState)
 ipcMain.handle('state-save', (_, s) => { cachedAppState = s; writeAppState(s) })
@@ -139,20 +148,168 @@ ipcMain.on('divo-notification', (event, { title, body }) => {
   } catch {}
 })
 
-// ── Sessions nommées
-const sessionsPath = path.join(app.getPath('userData'), 'sessions.json')
+// ── Sessions nommées (par profil)
 let cachedSessions = []
-try { cachedSessions = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8')) } catch {}
-function writeSessions(s) { try { fs.writeFileSync(sessionsPath, JSON.stringify(s)) } catch {} }
+function writeSessions(s) { try { fs.writeFileSync(path.join(profileDir(), 'sessions.json'), JSON.stringify(s)) } catch {} }
 
 ipcMain.handle('sessions-save', (_, s) => { cachedSessions = s; writeSessions(s) })
 ipcMain.on('sessions-load-sync', e => { e.returnValue = cachedSessions })
 
-// ── Historique persistant
+// ── Historique (global — partagé entre profils)
 const historyPath = path.join(app.getPath('userData'), 'history.json')
 let cachedHistory = []
 try { cachedHistory = JSON.parse(fs.readFileSync(historyPath, 'utf-8')) } catch {}
 function writeHistory(h) { try { fs.writeFileSync(historyPath, JSON.stringify(h)) } catch {} }
+
+// ── Chargement d'un profil
+function loadProfileData(id) {
+  activeProfileId = id
+  try { fs.mkdirSync(profileDir(id), { recursive: true }) } catch {}
+  config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
+  try { Object.assign(config, JSON.parse(fs.readFileSync(path.join(profileDir(id), 'config.json'), 'utf-8'))) } catch {}
+  cachedAppState = null
+  try { cachedAppState = JSON.parse(fs.readFileSync(path.join(profileDir(id), 'state.json'), 'utf-8')) } catch {}
+  cachedSessions = []
+  try { cachedSessions = JSON.parse(fs.readFileSync(path.join(profileDir(id), 'sessions.json'), 'utf-8')) } catch {}
+  profilesIndex.lastUsedId = id
+  saveProfilesIndex()
+}
+
+const PROFILE_PRESETS = {
+  video: { essentials: [
+    { id:'e1', title:'YouTube',     url:'https://www.youtube.com',      favicon:'https://www.youtube.com/favicon.ico' },
+    { id:'e2', title:'Netflix',     url:'https://www.netflix.com',      favicon:'https://www.netflix.com/favicon.ico' },
+    { id:'e3', title:'Prime Video', url:'https://www.primevideo.com',   favicon:'https://www.primevideo.com/favicon.ico' },
+    { id:'e4', title:'Anime-Sama',  url:'https://anime-sama.fr',        favicon:'https://anime-sama.fr/favicon.ico' },
+  ]},
+  work: { essentials: [
+    { id:'e1', title:'GitHub',  url:'https://github.com',       favicon:'https://github.com/favicon.ico' },
+    { id:'e2', title:'Claude',  url:'https://claude.ai',        favicon:'https://claude.ai/favicon.ico' },
+    { id:'e3', title:'ChatGPT', url:'https://chatgpt.com',      favicon:'https://chatgpt.com/favicon.ico' },
+    { id:'e4', title:'Google',  url:'https://www.google.com',   favicon:'https://www.google.com/favicon.ico' },
+  ]},
+  lecture: { essentials: [
+    { id:'e1', title:'ScanManga', url:'https://www.scan-manga.com', favicon:'https://www.scan-manga.com/favicon.ico' },
+    { id:'e2', title:'Mangadex',  url:'https://mangadex.org',       favicon:'https://mangadex.org/favicon.ico' },
+  ]},
+  gaming: { essentials: [
+    { id:'e1', title:'Steam',   url:'https://store.steampowered.com', favicon:'https://store.steampowered.com/favicon.ico' },
+    { id:'e2', title:'Discord', url:'https://discord.com/app',        favicon:'https://discord.com/favicon.ico' },
+    { id:'e3', title:'Twitch',  url:'https://www.twitch.tv',          favicon:'https://www.twitch.tv/favicon.ico' },
+  ]},
+}
+
+function makePresetState(key) {
+  const p = PROFILE_PRESETS[key]; if (!p) return null
+  return { tabs:[], essentials:p.essentials, favorites:[], spaces:[], activeTabId:null, activeEssentialId:'e1', activeSpaceId:null }
+}
+
+function initProfiles() {
+  try { fs.mkdirSync(PROFILES_DIR, { recursive: true }) } catch {}
+  try { profilesIndex = JSON.parse(fs.readFileSync(PROFILES_INDEX, 'utf-8')) } catch {}
+  if (profilesIndex.profiles.length > 0) return false
+  const legacyState    = path.join(app.getPath('userData'), 'state.json')
+  const legacyConfig   = path.join(app.getPath('userData'), 'config.json')
+  const legacySessions = path.join(app.getPath('userData'), 'sessions.json')
+  if (fs.existsSync(legacyState) || fs.existsSync(legacyConfig)) {
+    const id = 'default'
+    try {
+      fs.mkdirSync(profileDir(id), { recursive: true })
+      if (fs.existsSync(legacyState))    fs.copyFileSync(legacyState,    path.join(profileDir(id), 'state.json'))
+      if (fs.existsSync(legacyConfig))   fs.copyFileSync(legacyConfig,   path.join(profileDir(id), 'config.json'))
+      if (fs.existsSync(legacySessions)) fs.copyFileSync(legacySessions, path.join(profileDir(id), 'sessions.json'))
+    } catch {}
+    profilesIndex.profiles.push({ id, name:'Mon profil', emoji:'\u{1F3E0}', image:null, color:'#0a84ff' })
+    profilesIndex.lastUsedId = id
+    saveProfilesIndex()
+    return false
+  }
+  return true
+}
+
+async function showProfileSelectorWindow() {
+  return new Promise(resolve => {
+    pendingProfileSelectResolve = resolve
+    profileSelectorWin = new BrowserWindow({
+      width: 380, height: 540,
+      frame: false, resizable: false, center: true,
+      title: 'Divo — Profil',
+      icon: path.join(__dirname, 'assets', 'icon.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-profile.js'),
+        contextIsolation: true,
+        sandbox: true,
+      }
+    })
+    profileSelectorWin.loadFile(path.join(__dirname, 'renderer', 'profile-selector.html'))
+    profileSelectorWin.on('closed', () => {
+      profileSelectorWin = null
+      if (pendingProfileSelectResolve) {
+        const r = pendingProfileSelectResolve; pendingProfileSelectResolve = null
+        if (profilesIndex.profiles.length > 0) {
+          const id = profilesIndex.lastUsedId || profilesIndex.profiles[0].id
+          const p  = profilesIndex.profiles.find(x => x.id === id)
+          if (p) { loadProfileData(p.id); r(); return }
+        }
+        app.quit()
+      }
+    })
+  })
+}
+
+// IPC — sélecteur de profils
+ipcMain.handle('ps-get-data', () => ({ profiles: profilesIndex.profiles, isFirstRun: profilesIndex.profiles.length === 0 }))
+
+ipcMain.handle('ps-select', (_, id) => {
+  loadProfileData(id)
+  const r = pendingProfileSelectResolve; pendingProfileSelectResolve = null
+  setImmediate(() => { if (profileSelectorWin && !profileSelectorWin.isDestroyed()) profileSelectorWin.close() })
+  if (r) r()
+  return { ok: true }
+})
+
+ipcMain.handle('ps-create', (_, data) => {
+  const id = 'p' + Date.now()
+  try { fs.mkdirSync(profileDir(id), { recursive: true }) } catch {}
+  profilesIndex.profiles.push({ id, name: data.name||'Profil', emoji: data.emoji||'\u{1F3E0}', image: data.image||null, color: data.color||'#0a84ff' })
+  if (data.presetKey) { const st = makePresetState(data.presetKey); if (st) try { fs.writeFileSync(path.join(profileDir(id),'state.json'), JSON.stringify(st)) } catch {} }
+  loadProfileData(id)
+  const r = pendingProfileSelectResolve; pendingProfileSelectResolve = null
+  setImmediate(() => { if (profileSelectorWin && !profileSelectorWin.isDestroyed()) profileSelectorWin.close() })
+  if (r) r()
+  return { ok: true }
+})
+
+ipcMain.handle('ps-edit', (_, id, data) => {
+  const p = profilesIndex.profiles.find(x => x.id === id); if (!p) return { ok: false }
+  if (data.name  !== undefined) p.name  = data.name
+  if (data.emoji !== undefined) p.emoji = data.emoji
+  if (data.color !== undefined) p.color = data.color
+  if (data.image !== undefined) p.image = data.image
+  saveProfilesIndex(); return { ok: true }
+})
+
+ipcMain.handle('ps-delete', (_, id) => {
+  if (profilesIndex.profiles.length <= 1) return { ok: false, reason: 'last' }
+  const idx = profilesIndex.profiles.findIndex(p => p.id === id); if (idx === -1) return { ok: false }
+  profilesIndex.profiles.splice(idx, 1)
+  if (profilesIndex.lastUsedId === id) profilesIndex.lastUsedId = profilesIndex.profiles[0].id
+  saveProfilesIndex()
+  try { fs.rmSync(profileDir(id), { recursive: true, force: true }) } catch {}
+  return { ok: true }
+})
+
+ipcMain.handle('ps-close',            () => { app.quit() })
+ipcMain.handle('get-active-profile',  () => profilesIndex.profiles.find(p => p.id === activeProfileId) || null)
+ipcMain.handle('get-all-profiles',    () => profilesIndex.profiles)
+ipcMain.handle('switch-profile',      () => { app.relaunch(); app.exit(0) })
+ipcMain.handle('edit-active-profile', (_, data) => {
+  const p = profilesIndex.profiles.find(x => x.id === activeProfileId); if (!p) return { ok: false }
+  if (data.name  !== undefined) p.name  = data.name
+  if (data.emoji !== undefined) p.emoji = data.emoji
+  if (data.color !== undefined) p.color = data.color
+  saveProfilesIndex(); return { ok: true }
+})
 
 ipcMain.handle('history-save', (_, h) => { cachedHistory = h; writeHistory(h) })
 ipcMain.on('history-load-sync', e => { e.returnValue = cachedHistory })
@@ -1642,6 +1799,16 @@ app.whenReady().then(async () => {
       })
     }
   })
+
+  // ── Démarrage avec sélecteur de profils
+  const isFirstRun = initProfiles()
+  if (isFirstRun || profilesIndex.profiles.length === 0) {
+    await showProfileSelectorWindow()
+  } else if (profilesIndex.profiles.length === 1) {
+    loadProfileData(profilesIndex.profiles[0].id)
+  } else {
+    await showProfileSelectorWindow()
+  }
 
   createWindow()
 

@@ -652,6 +652,7 @@ function wireWebviewEvents(el) {
         const wdm = await window.bridge.webDarkModeStatus()
         const hu  = await window.bridge.httpsUpgradeStatus()
         const isDefault = await window.bridge.isDefaultBrowser()
+        const activeProfile = await window.bridge.getActiveProfile()
         el.executeJavaScript(`(function(){
           document.getElementById('search-engine').value    = ${JSON.stringify(se)};
           document.getElementById('homepage').value         = ${JSON.stringify(hp)};
@@ -687,6 +688,11 @@ function wireWebviewEvents(el) {
               _uBtn.textContent = 'Vérifier';
               _uBtn.dataset.state = 'idle';
             }
+          }
+          const _pName = document.getElementById('active-profile-name');
+          if (_pName && ${JSON.stringify(activeProfile)}) {
+            const p = ${JSON.stringify(activeProfile)};
+            _pName.textContent = (p.emoji ? p.emoji + '  ' : '') + p.name;
           }
         })()`).catch(() => {})
       }, 300)
@@ -819,6 +825,10 @@ function wireWebviewEvents(el) {
     }
     if (e.title === 'divo-settings-action:install-update' && isSettings(currentUrl)) {
       if (pendingUpdate) updateInstallBtn.click()
+      return
+    }
+    if (e.title === 'divo-settings-action:switch-profile' && isSettings(currentUrl)) {
+      window.bridge.switchProfile()
       return
     }
     if (e.title === 'divo-settings-action:export-profile' && isSettings(currentUrl)) {

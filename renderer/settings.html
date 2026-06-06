@@ -348,11 +348,18 @@
     </div>
 
     <div class="section">
-      <div class="section-title">Profil</div>
+      <div class="section-title">Profil actif</div>
       <div class="card">
         <div class="setting-row">
           <div>
-            <div class="setting-label">Exporter le profil</div>
+            <div class="setting-label" id="active-profile-name">Chargement…</div>
+            <div class="setting-desc">Essentials, favoris, sessions et paramètres de ce profil</div>
+          </div>
+          <button class="default-btn" id="btn-switch-profile">Changer</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Exporter ce profil</div>
             <div class="setting-desc">Sauvegarde favoris, espaces, historique, sessions et paramètres dans un fichier .divo-profile</div>
           </div>
           <button class="default-btn" id="btn-export-profile">Exporter</button>
@@ -367,7 +374,7 @@
       </div>
     </div>
 
-    <p class="version-text"><span id="secret-trigger" style="cursor:default">Divo</span> 3.0.1 — fait avec ❤️</p>
+    <p class="version-text"><span id="secret-trigger" style="cursor:default">Divo</span> 4.0.0 — fait avec ❤️</p>
   </div>
 
   <script src="settings.js"></script>

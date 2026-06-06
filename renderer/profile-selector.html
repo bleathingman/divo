@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none';
+             style-src 'unsafe-inline';
+             script-src 'self';
+             img-src data: https:;">
+  <title>Divo — Profil</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 380px; height: 540px; overflow: hidden;
+      background: #111113; color: #f5f5f7;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      user-select: none; -webkit-user-select: none;
+    }
+
+    .drag { -webkit-app-region: drag; position: fixed; top: 0; left: 0; right: 0; height: 34px; z-index: 10; }
+
+    .close-btn {
+      -webkit-app-region: no-drag;
+      position: fixed; top: 9px; right: 12px;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: #3a3a3c; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 11; color: #636366; font-size: 12px;
+      transition: background .15s, color .15s;
+    }
+    .close-btn:hover { background: #ff453a; color: #fff; }
+
+    .container { display: flex; flex-direction: column; height: 100%; padding: 0 20px 20px; }
+
+    .header { padding-top: 42px; text-align: center; margin-bottom: 22px; flex-shrink: 0; }
+
+    .logo-wrap {
+      width: 52px; height: 52px; border-radius: 14px;
+      background: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 11px;
+      box-shadow: 0 6px 20px rgba(10,132,255,.35);
+    }
+    .logo-letter { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: -1px; }
+
+    .main-title   { font-size: 17px; font-weight: 600; color: #f5f5f7; margin-bottom: 3px; }
+    .main-sub     { font-size: 12px; color: #636366; }
+
+    .list-wrap {
+      flex: 1; overflow-y: auto; overflow-x: hidden;
+      margin: 0 -4px; padding: 0 4px;
+    }
+    .list-wrap::-webkit-scrollbar { width: 4px; }
+    .list-wrap::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 2px; }
+
+    .profile-card {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px; background: #1c1c1e; border-radius: 12px;
+      cursor: pointer; margin-bottom: 7px;
+      border: 1px solid transparent;
+      transition: background .14s, transform .1s;
+      position: relative;
+    }
+    .profile-card:hover { background: #2c2c2e; }
+    .profile-card:hover .card-actions { opacity: 1; }
+    .profile-card:active { transform: scale(.99); }
+
+    .avatar {
+      width: 40px; height: 40px; border-radius: 11px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 20px;
+    }
+    .avatar img { width: 100%; height: 100%; border-radius: 11px; object-fit: cover; }
+
+    .card-info { flex: 1; min-width: 0; }
+    .card-name { font-size: 14px; font-weight: 500; color: #f5f5f7; }
+    .card-desc { font-size: 11px; color: #636366; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .card-arrow { color: #3a3a3c; font-size: 17px; flex-shrink: 0; transition: color .14s; }
+    .profile-card:hover .card-arrow { color: #636366; }
+
+    .card-actions {
+      opacity: 0; display: flex; gap: 4px; flex-shrink: 0;
+      transition: opacity .14s;
+    }
+    .card-action-btn {
+      -webkit-app-region: no-drag;
+      width: 28px; height: 28px; border-radius: 7px; border: none;
+      background: #3a3a3c; color: #aeaeb2; cursor: pointer; font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .12s, color .12s;
+    }
+    .card-action-btn:hover { background: #48484a; color: #f5f5f7; }
+    .card-action-btn.del:hover { background: #ff453a22; color: #ff453a; }
+
+    .footer { flex-shrink: 0; padding-top: 12px; }
+
+    .btn-new {
+      -webkit-app-region: no-drag;
+      width: 100%; padding: 12px; background: #1c1c1e;
+      border: 1px dashed #3a3a3c; border-radius: 12px;
+      color: #0a84ff; font-size: 13px; font-weight: 500;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: background .14s, border-color .14s;
+    }
+    .btn-new:hover { background: #2c2c2e; border-color: #0a84ff; }
+
+    /* ── Create / Edit form ── */
+    .form-panel {
+      position: absolute; inset: 0; background: #111113;
+      padding: 42px 20px 20px;
+      display: flex; flex-direction: column; gap: 16px;
+      transform: translateX(105%);
+      transition: transform .24s cubic-bezier(.4,0,.2,1);
+      z-index: 20; overflow-y: auto;
+    }
+    .form-panel.open { transform: translateX(0); }
+
+    .form-back {
+      -webkit-app-region: no-drag;
+      position: absolute; top: 8px; left: 12px;
+      background: none; border: none; color: #0a84ff; font-size: 13px;
+      cursor: pointer; padding: 4px 8px; border-radius: 7px;
+      transition: background .12s;
+    }
+    .form-back:hover { background: rgba(10,132,255,.1); }
+
+    .form-title { font-size: 16px; font-weight: 600; color: #f5f5f7; margin-bottom: 2px; }
+
+    .field-label {
+      font-size: 10px; font-weight: 600; color: #48484a;
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px;
+    }
+
+    .emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+    .emoji-btn {
+      -webkit-app-region: no-drag;
+      padding: 5px; background: #1c1c1e; border: 1.5px solid transparent;
+      border-radius: 8px; font-size: 17px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .1s, border-color .1s;
+    }
+    .emoji-btn:hover { background: #2c2c2e; }
+    .emoji-btn.on { border-color: #0a84ff; background: rgba(10,132,255,.1); }
+
+    .color-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .color-dot {
+      -webkit-app-region: no-drag;
+      width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+      border: 2px solid transparent; outline: 2px solid transparent;
+      transition: transform .12s, outline-color .12s;
+    }
+    .color-dot:hover { transform: scale(1.12); }
+    .color-dot.on { outline-color: rgba(255,255,255,.6); transform: scale(1.12); }
+
+    .name-input {
+      -webkit-app-region: no-drag;
+      width: 100%; padding: 10px 13px; background: #1c1c1e;
+      border: 1px solid #3a3a3c; border-radius: 10px;
+      color: #f5f5f7; font-size: 13px; outline: none;
+      transition: border-color .14s;
+    }
+    .name-input:focus { border-color: #0a84ff; }
+    .name-input::placeholder { color: #48484a; }
+
+    .form-footer { display: flex; gap: 10px; margin-top: auto; padding-top: 8px; }
+    .btn-cancel {
+      -webkit-app-region: no-drag;
+      padding: 11px 18px; background: #2c2c2e; border: none;
+      border-radius: 10px; color: #f5f5f7; font-size: 13px; cursor: pointer;
+    }
+    .btn-cancel:hover { background: #3a3a3c; }
+    .btn-ok {
+      -webkit-app-region: no-drag;
+      flex: 1; padding: 11px; background: #0a84ff; border: none;
+      border-radius: 10px; color: #fff; font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: filter .14s;
+    }
+    .btn-ok:hover { filter: brightness(1.1); }
+    .btn-ok:disabled { background: #3a3a3c; color: #636366; cursor: default; filter: none; }
+
+    /* ── Confirm delete overlay ── */
+    .confirm-overlay {
+      position: absolute; inset: 0; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 30; opacity: 0; pointer-events: none;
+      transition: opacity .18s;
+    }
+    .confirm-overlay.open { opacity: 1; pointer-events: all; }
+    .confirm-box {
+      background: #1c1c1e; border-radius: 14px; padding: 22px 20px;
+      width: 280px; text-align: center;
+    }
+    .confirm-msg { font-size: 14px; color: #f5f5f7; margin-bottom: 6px; }
+    .confirm-sub { font-size: 12px; color: #636366; margin-bottom: 18px; }
+    .confirm-btns { display: flex; gap: 10px; }
+    .confirm-btns button {
+      -webkit-app-region: no-drag;
+      flex: 1; padding: 11px; border: none; border-radius: 10px;
+      font-size: 13px; cursor: pointer;
+    }
+    .confirm-cancel { background: #3a3a3c; color: #f5f5f7; }
+    .confirm-cancel:hover { background: #48484a; }
+    .confirm-delete { background: #ff453a; color: #fff; font-weight: 500; }
+    .confirm-delete:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body>
+  <div class="drag"></div>
+  <button class="close-btn" id="btn-close">✕</button>
+
+  <div class="container">
+    <div class="header">
+      <div class="logo-wrap"><span class="logo-letter">D</span></div>
+      <div class="main-title" id="main-title">Choisir un profil</div>
+      <div class="main-sub"   id="main-sub">Sélectionnez votre espace de navigation</div>
+    </div>
+    <div class="list-wrap" id="list-wrap"></div>
+    <div class="footer" id="footer">
+      <button class="btn-new" id="btn-new">
+        <span style="font-size:16px;font-weight:300">+</span> Nouveau profil
+      </button>
+    </div>
+  </div>
+
+  <!-- Create/Edit form -->
+  <div class="form-panel" id="form-panel">
+    <button class="form-back" id="form-back">‹ Retour</button>
+    <div class="form-title" id="form-title">Nouveau profil</div>
+
+    <div>
+      <div class="field-label">Emoji</div>
+      <div class="emoji-grid" id="emoji-grid"></div>
+    </div>
+
+    <div>
+      <div class="field-label">Couleur</div>
+      <div class="color-row" id="color-row"></div>
+    </div>
+
+    <div>
+      <div class="field-label">Nom du profil</div>
+      <input class="name-input" id="name-input" type="text" placeholder="Mon profil" maxlength="30" autocomplete="off">
+    </div>
+
+    <div class="form-footer">
+      <button class="btn-cancel" id="btn-cancel">Annuler</button>
+      <button class="btn-ok"     id="btn-ok"     disabled>Créer</button>
+    </div>
+  </div>
+
+  <!-- Confirm delete -->
+  <div class="confirm-overlay" id="confirm-overlay">
+    <div class="confirm-box">
+      <div class="confirm-msg">Supprimer ce profil ?</div>
+      <div class="confirm-sub" id="confirm-sub">Cette action est irréversible.</div>
+      <div class="confirm-btns">
+        <button class="confirm-cancel" id="confirm-cancel">Annuler</button>
+        <button class="confirm-delete" id="confirm-delete">Supprimer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="profile-selector.js"></script>
+</body>
+</html>

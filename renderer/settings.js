@@ -53,6 +53,9 @@ document.getElementById('update-action-btn').addEventListener('click', function(
 })
 
 ;(function() {
+  document.getElementById('btn-switch-profile').addEventListener('click', function() {
+    document.title = 'divo-settings-action:switch-profile'
+  })
   document.getElementById('btn-export-profile').addEventListener('click', function() {
     document.title = 'divo-settings-action:export-profile'
   })
