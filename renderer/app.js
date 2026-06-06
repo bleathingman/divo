@@ -643,6 +643,7 @@ function wireWebviewEvents(el) {
     // Initialisation settings — toujours, peu importe si actif ou non
     if (isSettings(e.url)) {
       setTimeout(async () => {
+        if (!el.__ready) return
         const se  = localStorage.getItem('divo-search-engine') || 'google'
         const hp  = localStorage.getItem('divo-homepage')      || 'newtab'
         const ss  = localStorage.getItem('divo-save-session')  || 'yes'
