@@ -2190,8 +2190,8 @@ function buildContextMenu(type) {
     return
   }
   let essCurrentUrl = null
-  try { const activeWv = wv(); if (activeWv) essCurrentUrl = activeWv.getURL() } catch {}
-  const canUpdateUrl = essCurrentUrl && !isSpecial(essCurrentUrl)
+  try { const essWv = pageWebviews.get(ctxTargetId); if (essWv) essCurrentUrl = essWv.getURL() } catch {}
+  const canUpdateUrl = essCurrentUrl && (essCurrentUrl.startsWith('http://') || essCurrentUrl.startsWith('https://'))
   contextMenu.innerHTML = `
     <button class="ctx-item" data-action="rename">${ICO.rename} Renommer</button>
     <button class="ctx-item" data-action="open-tab">${ICO.openTab} Ouvrir dans un onglet</button>
@@ -2664,8 +2664,11 @@ contextMenu.addEventListener('click', e => {
       const ess = essentials.find(e => e.id === targetId)
       if (ess) {
         try {
-          const newUrl = wv()?.getURL()
-          if (newUrl && !isSpecial(newUrl)) { ess.url = newUrl; saveState(); renderEssentials() }
+          const essWv = pageWebviews.get(targetId)
+          const newUrl = essWv?.getURL()
+          if (newUrl && (newUrl.startsWith('http://') || newUrl.startsWith('https://'))) {
+            ess.url = newUrl; saveState(); renderEssentials()
+          }
         } catch {}
       }
       break
