@@ -636,9 +636,9 @@ function wireWebviewEvents(el) {
       if (tab.url !== e.url) { tab.scrollY = 0; tab._resumeScroll = false }
       tab.url = e.url; saveState()
     }
-    // Persistence URL pour les essentials
+    // Persistence URL pour les essentials — uniquement http(s), jamais about:blank/divo:/etc.
     const ess = essentials.find(x => x.id === el.__key)
-    if (ess && !isSpecial(e.url)) { ess.url = e.url; saveState() }
+    if (ess && (e.url.startsWith('http://') || e.url.startsWith('https://'))) { ess.url = e.url; saveState() }
 
     // Initialisation settings — toujours, peu importe si actif ou non
     if (isSettings(e.url)) {
@@ -722,7 +722,7 @@ function wireWebviewEvents(el) {
     const tab = tabs.find(t => t.id === el.__key)
     if (tab) { tab.url = e.url; saveState() }
     const ess = essentials.find(x => x.id === el.__key)
-    if (ess && !isSpecial(e.url)) { ess.url = e.url; saveState() }
+    if (ess && (e.url.startsWith('http://') || e.url.startsWith('https://'))) { ess.url = e.url; saveState() }
     if (el !== wv()) return
     syncUrlBars(displayUrl(e.url))
     updateNavButtons()
