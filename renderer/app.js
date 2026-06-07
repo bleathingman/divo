@@ -379,14 +379,9 @@ function saveState() {
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     try {
-      const s = getCurrentState()
-      localStorage.setItem('arc-essentials',   JSON.stringify(s.essentials))
-      localStorage.setItem('arc-favorites',    JSON.stringify(s.favorites))
-      localStorage.setItem('arc-tabs',         JSON.stringify(s.tabs))
-      localStorage.setItem('arc-spaces',       JSON.stringify(s.spaces))
-      localStorage.setItem('arc-active-space', s.activeSpaceId)
-      localStorage.setItem('arc-active-ess',   s.activeEssentialId)
-      window.bridge.stateSave(s).catch(() => {})
+      // state.json (par profil) est la seule source de vérité — ne plus écrire
+      // dans le localStorage partagé entre profils (cause de fuite essentials/favoris)
+      window.bridge.stateSave(getCurrentState()).catch(() => {})
     } catch {}
   }, 400)
 }

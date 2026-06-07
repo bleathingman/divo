@@ -168,7 +168,9 @@ function loadProfileData(id) {
   try { fs.mkdirSync(profileDir(id), { recursive: true }) } catch {}
   config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
   try { Object.assign(config, JSON.parse(fs.readFileSync(path.join(profileDir(id), 'config.json'), 'utf-8'))) } catch {}
-  cachedAppState = null
+  // {} (et non null) — pour qu'un profil neuf utilise ses propres défauts
+  // au lieu de retomber sur le localStorage partagé (qui contient le profil précédent)
+  cachedAppState = {}
   try { cachedAppState = JSON.parse(fs.readFileSync(path.join(profileDir(id), 'state.json'), 'utf-8')) } catch {}
   cachedSessions = []
   try { cachedSessions = JSON.parse(fs.readFileSync(path.join(profileDir(id), 'sessions.json'), 'utf-8')) } catch {}
