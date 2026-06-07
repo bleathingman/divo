@@ -1239,7 +1239,7 @@ body.light .reader-close:hover { background: #e5e5ea; color: #1c1c1e }
 .autofill-bar.visible { transform: translateY(0) }
 
 .passwords-panel {
-  position: absolute;
+  position: fixed;
   top: 0; right: 0; bottom: 0;
   width: 320px;
   background: #1c1c1e;
@@ -1350,7 +1350,7 @@ body.light .pw-cancel-btn { background: #e5e5ea; color: #3a3a3c }
 
 /* ── SESSIONS ── */
 .sessions-panel {
-  position: absolute;
+  position: fixed;
   top: 0; right: 0; bottom: 0;
   width: 320px;
   background: #1c1c1e;
@@ -1496,7 +1496,7 @@ body.light .pw-cancel-btn { background: #e5e5ea; color: #3a3a3c }
 
 /* ── HISTORY ── */
 .history-panel {
-  position: absolute;
+  position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
