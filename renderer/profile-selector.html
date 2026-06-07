@@ -42,7 +42,7 @@
       margin: 0 auto 11px;
       box-shadow: 0 6px 20px rgba(10,132,255,.35);
     }
-    .logo-letter { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: -1px; }
+    .logo-img { width: 34px; height: 34px; object-fit: contain; display: block; }
 
     .main-title   { font-size: 17px; font-weight: 600; color: #f5f5f7; margin-bottom: 3px; }
     .main-sub     { font-size: 12px; color: #636366; }
@@ -68,7 +68,8 @@
 
     .avatar {
       width: 40px; height: 40px; border-radius: 11px; flex-shrink: 0;
-      display: flex; align-items: center; justify-content: center; font-size: 20px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px; line-height: 1; text-align: center;
     }
     .avatar img { width: 100%; height: 100%; border-radius: 11px; object-fit: cover; }
 
@@ -216,14 +217,14 @@
 
   <div class="container">
     <div class="header">
-      <div class="logo-wrap"><span class="logo-letter">D</span></div>
+      <div class="logo-wrap"><img class="logo-img" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAA3lSURBVHhe7d17lF1VfQfwCSgPAYuysLXEYFVQKMVixUKlgqaIRURXlYoGq0UqhhaQUoSuruW0YFharAElUiCCxISU4WkSSfNiEhjymskwmczMTSYzmffc9znnntd+/fY9Xb8zM3hn585kbsLM3On6ff6b893n3qzsc+45e5+996mpIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCFkTqqtfdsun13Vy8R/WRI2eQB7HAVbB4V6cBdjC83i5P+RVsZutCUMRFEUOQC+BdCYkrA+o2CHpcDB7ZaCg00F/xpzXzKXvdx54hCXz2AF5wBee4Oxz87v7z95XJm6thOa3PCypJCbsVxKquV1VrhgXBkyNw0J+Rus1ANc3mVm5bQxebOtQPEoijJStaeVenpI6fu6OL+tR8D1vUwtbBfiotX5/PtqamrmmfuTKtIesP/Aym8N+b+a2WRqe9J/0CXl4rSULzmg2x0F6bxSaVtB0gFQ+JmoxfG+au5LqsSqgcw5oliM0gCvmBkaUGpZDvTezUFwlpmVs87x/mpQypf8KIpC0DLJ+KpNQxZdJqpVH5e/xLN0rWV91MxQDnQD5o2e+BMze9N1dcd3C7EIbxixrAdgDzDxwAuZwrlmUVJFfj44eEaotcgpeM3MxjzuOO/eUuAfNreP2ROKr1oKDo22GhIHmbhpUWfnO81ypArt9cKvYcUdFOIbZnYkP8xk3jssYO1IxetEixv8jVmGVLkhzldDFEW/yk3t+j7mZc+70AZIYuV3cXl3TW3tcWYZUu2amt5uK5W1AdrNaDIrLetsDyDva+3Uu+FlZk7miFXZ7EfizhylHjazyQwJWY+thhdt+0/NjMwhzW7wlUqv/1uD4OJ4HybuMzMyxxxiYglW5lYxSfPO0MXl7fE+vrjIzMgck5RyfaB1+J2hoXeY2UT2h/yf8QD4jeddaGZkLqmtPS6vVNICaDKjybzus6vwAGgNxQ1mRuYQbPZh86/SG8C7EtnTAq3drIKdZkbmkEaPXTlyM8duMrMjSTBxL+67M+BfMjMyR3SF/G6sxFeD4M/N7EhuSadPtQAGfdCpGxPZ08yczAEpCc8xrWGpbZ9eun17EJzV6LPPlm4rZ43lXo4H0KCUdWZGqt88S6kBG2CfGWDPXjGKom1O8AkzM7UGLG5G7nD9fzAzUsUeHBpagDeASaUeM7OaKJpnAXQlldpqRmXMSyu1g2kdPZPKT7kvgcyyZt+/Gs/cTiG+bWaok/PvY/5coXCOmZkeHbIWBACBA/rA5fU9J5k5qUI9QtwX3wAKUbYz56lM4VzMu4W418zK2TnapdzL+RNmRqpQUqjXsC3/zZ6Jz9g8QFdaQae5fSLdXD45cj9AYwKq2i1t6VM9AJYF2GBmpfqVWor3Cb9MOR8ws3Kua0uf6gAM+QD5ezoGzzBzUiW2FMK/wDM1wfm/mVmp3QG/drTLd5GZTeSVgv/5+NLB5QozI1Wic7QDaIvrfsrMSj08bJ2NvwADUj1uZpPpE/IF/PythfBSMyNVIC3kxkBrcWsuN/mgzdra4yyAVEapvWY0mUeSyffLooa0UDvMjMyyO1uSpwRa41y/BjMrJwd6i6e1/2dNTVN+XIwOcL4MfwW2Of5VZkZmUYMb/iVWDDYDzaycpFLLsFfwSdt+v5lNBi8foljU2NowMzKLujj/AR4Ar7ju5WZWTieXcYfQplBWfD0flnI17kvjBqtIVqldvtbBlS3JU8ysnH2h+DusxKYgqPix7wbL/VTcOcTEUjMjs+DBlPf7XOvisJDrzGwiu3x+DVZiJ2M3mtkR1dUdbykYLAAM4/BzMyYzrDUU12FltjH2HTObyD6lPj3aZ3CbmU1FFxM/jS85hcrHHJC32CCXqzTOAHKcD5rZRPqkvAwrsE/K75nZVGx1vHjUUS/n/2JmZAbhUzoPtJ0FaDOzMY1e+PVdnvjj0m0HpIyv4z2cH9UBsGR4+Eymtc6DfsHMyAx63fY+gxV5UKh/NzO0tMc+PR9FUXPAv1K6fRdjn8P99jP2j6XbK5FTKuEoGKC5g7Ool4u4Y+ZZ2y47maM9YIuDKIoeGnbPLN2+X0B833CogplDprSUL7JiMbqzK/keMyMzoanp7Y5SaQvgEI72MWNkA3TmFLxqbu9kcjEeAM2cX21mUzUk1E/i/oC8RyOGZkO97V0RX8eFKju4Y2vB/2vM28PDz/JeoX6I2Xrf/5iZTVVnwOOpZDsYu8LMyAw4NDpQY43rfsTMUF7BG77WBRzqbWZJpVbgE8FHKlw7oFSCsW/h97cE/AtmRqbZos7cOwOtg9wE07+2e+HfYuV0cF5rZiit1E5sPZzf1naCmU3VIED8HQc5TSKZcbt99vfxNdxnhw3+vCGZPAV76TyA7K1l1vM5v67tBBvAsbU+pse6B0PxDfoFmCVZqZqx7//2np5xkz/Q/pD/DCvmDca+ZWZoVYGfg/mAUL8ws0p0BOyf4oOQsSvNjEyjzY7zidEm3GGTPzfbXtzFOyzlRjMb80Yo4p/uVv8ongOU6BEj8wi32Ud/I0mOQr8Qz+Oz/NXGOn24smcBIO1r7S4bjJdwLauHi4ex4p63/LJrB05VP5dPYhf0QwO5+WZGpsnqXO48rPxBCc+OC+rqTsCZPFixDUeY/5cDaHVB2x/q7DzRzCqRVGqbB+DSpJEZ1C9kHVbyOtc9782NtbXHDcmRxaCbA3bLuB0My7PBH8qiLqYkHNvEz/r6t9kAWQtgtxmRabLW8j+Kldwn1a/Htl3S339yGuC3uL0T1/Q7guZQfB3LYhvezCrx5OgqZANl7kPINEkJ0RBqrf47k3kv/o3TvPIKWrAi2hi71SxfDk75xuv2iqT9R2ZWiWY//CZ+774wvN7MyDRocLxF8X/46Kof+3z2bUeB9rVmTT6/ZkehcM6AlJvvMF8CUeKGluQpntZeDqDFzCo1JGSdjFchzR11TyKZolV9zrs8BbmUUrvW2d6nHYCdeDDgFLDnnJHpXY0ei58L1IcTr+65J+BfwDLdXFb03gDTDS0tOATdy9NaQjNjf8jvwYrLKBViC8BS0LE3CMY931/nsA9glpDyu6XbSw1JiJuPU5kaPpkmN/gS/nv2M7bYzMg0aPX9qz2ApoLSK/cxVXZCxgNJ7z34ehcHoOy8wCWpFA4clTnQxzyeHxeYwHuRh4aHx40xILNoieueyaIoKmhd9tHw3oDfgWftnmO8aXs6ZV2In9PL+a/MjMyitUFwFt7dWwCHP/3DuYAKDnkAuWsqnApm6uMjk0I25PMXmBmZRa9yfj5WzCEpDxulOzYdfD/nPzCzSqzOuefhQTYs5YtmRmZZcyjjpd32heFho39yCppC0HyJMS6wUoNCbsDvGNcLSapD2+jonHrXHdcMbCiMLBrVJcRPSrdXqqEQxL8iXZwvMzNSBfA9wPjz/FguGPdkzlKwLwRg2Eoo3V6JaxPZ01yAVAA6c3d39++ZOakCKaW2WQCZmig6fmzb3nCku/YAY2VbBlN1iPGn8XN2B8G1ZkaqAD4QcgHCjITnx7bd3mOf7gNkC6CTuHjU+D2mbo8bfDe+ueTimEYPkWn027z7yfj6XNILeJCLX4y0+8VRt/vXW2686EReQRPNAq5i+4W4HytqVSYTd/GuyRcuxb8zAP9rlp2q5YPZD7sANr5B7Cl6NWxVm2cr6M0DdOAf87dvPzkrVTfTOnzUOrqKeyyXm49z/nDy58ZCcImZkyqysVC4BM/2Ts7vwL8Pcbkc/55oRPCRPJ52PpRX0IOf0TTJk0VSJXq5XMW0LuI1unV0tO+gVEe1mOMaJ7jYAcjgjKF2xhauz9gfSwT8y2Y5UiV+NJCbr3CImFIPPGeFZ+MADXxPALYKzLJHgmsIhLoY+aBZI871q68/yddaDgt1v1mWVAlsmslikS/NFy71Qff4oK2prv/7pvqek3q4+Dn+ctgAibWeFz/k6WZ8RQCa3ZWl18ZUpRcyhXNVURd3h/yRlFINAmf6VriEa73nXWEBJLDy00qtHKvs+wcHzwi01gOC2v5Va1jILRmpwj4u92IX8E42+VyAUk9Z1oIBqZ7AincBXFwyrjR/bfStY218/KoipEo0ekE8J8+JoghH5jQzNaW5eU/k8+8bYOLHgcaBYVGUkmr5T0dHGJfa4QZfxjwxwegjMos22N5nfAC8UcezN/mqG37SLGPaGMiP4zQuHDKGMgBrXneCi81yYzb5/kVY7lgHj5K3WH2ucIkH2h+5ZsP2FTabcGz/U1a4oEvKxS5APF0sLBa5pdRjW3xx5PmAdXXHZ6RqD7X2n7X9smsPkRm2s+B/PgQdn/m9QjxYU7Kww7WJxGm4SsjegH/xoFD3peM5exrXhoqGFWQ7hHjgGXxV3Jqmd9S83Hni2fHrZCZf2evZbPbjrlIBNi37hHr4Fdtb+Eh/7izsacTeR7M8mUZ7C168Fo8H0N7k/26Z9g2ed4GloNsFjd0BZRVGLhUcB4xiZYa4DYA5CnK+1ok9Hls4/tt+53+S+QuSXGwa+yw8+hwFAY4N8LXudZTq2GN7E+5P3iIdnnd9T8C/Zz6Rez4XzO8N2dKcUD/KSvn9RMBuTQTs5v1M3NTB2E0Jxm5uD/htB0J+Zx/n9wxLWTvAxH/2cfGzlJTLC1KtbJzCSySxydklxNf6hLh3iItHc1I+kxbipbyUK3fRiuGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIWSm/B/VEVm2D3renAAAAABJRU5ErkJggg==" alt="Divo"></div>
       <div class="main-title" id="main-title">Choisir un profil</div>
       <div class="main-sub"   id="main-sub">Sélectionnez votre espace de navigation</div>
     </div>
     <div class="list-wrap" id="list-wrap"></div>
     <div class="footer" id="footer">
       <button class="btn-new" id="btn-new">
-        <span style="font-size:16px;font-weight:300">+</span> Nouveau profil
+        <span style="font-size:15px;font-weight:300;line-height:1">+</span> Nouveau profil
       </button>
     </div>
   </div>

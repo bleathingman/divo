@@ -235,7 +235,7 @@ async function showProfileSelectorWindow() {
     pendingProfileSelectResolve = resolve
     profileSelectorWin = new BrowserWindow({
       width: 380, height: 540,
-      frame: false, resizable: false, center: true,
+      frame: false, resizable: false, center: true, thickFrame: false,
       title: 'Divo — Profil',
       icon: path.join(__dirname, 'assets', 'icon.png'),
       webPreferences: {
@@ -322,7 +322,7 @@ ipcMain.handle('get-all-profiles',    () => profilesIndex.profiles)
 ipcMain.handle('switch-profile',      () => {
   profileSelectorWin = new BrowserWindow({
     width: 380, height: 540,
-    frame: false, resizable: false, center: true,
+    frame: false, resizable: false, center: true, thickFrame: false,
     title: 'Divo — Profil',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
