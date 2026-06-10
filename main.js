@@ -835,10 +835,13 @@ function setupExtensionsFramework() {
       })
     },
     selectTab(tab) {
-      mainWindow?.webContents.send('ext-select-tab', tab.id)
+      try { mainWindow?.webContents.send('ext-select-tab', tab.id) } catch {}
     },
     removeTab(tab) {
-      mainWindow?.webContents.send('ext-remove-tab', tab.id)
+      // tab.contents peut déjà être détruit à ce stade (fermeture d'onglet) —
+      // accéder à tab.id lève alors "Object has been destroyed", qui crashait
+      // tout le process principal via uncaughtException.
+      try { mainWindow?.webContents.send('ext-remove-tab', tab.id) } catch {}
     },
     async createWindow() {
       // Divo est mono-fenêtre : chrome.windows.create ouvre un nouvel onglet
@@ -1799,7 +1802,7 @@ app.whenReady().then(async () => {
       // extensions) — uniquement sur persist:divo, seule session équipée du cadre
       // electron-chrome-extensions.
       if (chromeExtensions && contents.session === session.fromPartition('persist:divo')) {
-        chromeExtensions.addTab(contents, mainWindow)
+        try { chromeExtensions.addTab(contents, mainWindow) } catch (e) { console.error('[ext] addTab failed:', e) }
         contents.once('destroyed', () => {
           try { chromeExtensions.removeTab(contents) } catch {}
         })
