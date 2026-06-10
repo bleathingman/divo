@@ -1,5 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// <browser-action-list> / <button is="browser-action"> — icône et popup des
+// extensions (uBlock Origin) dans la barre d'outils.
+try { require('electron-chrome-extensions/browser-action').injectBrowserAction() } catch {}
+
 // Chargé synchronement avant que app.js tourne — élimine tout problème de timing
 const __divoInitState     = ipcRenderer.sendSync('state-load-sync')
 const __divoInitHistory   = ipcRenderer.sendSync('history-load-sync')
@@ -48,6 +52,11 @@ contextBridge.exposeInMainWorld('bridge', {
   removeUserExtension:  (id)  => ipcRenderer.invoke('remove-user-extension', id),
   toggleUserExtension:  (id, enabled) => ipcRenderer.invoke('toggle-user-extension', id, enabled),
   onExtensionInstalled: (cb)  => ipcRenderer.on('extension-installed', (_, d) => cb(d)),
+  extTabActivated:      (id)  => ipcRenderer.send('ext-tab-activated', id),
+  extCreateTabResult:   (requestId, webContentsId) => ipcRenderer.send('ext-create-tab-result', { requestId, webContentsId }),
+  onExtCreateTab:       (cb)  => ipcRenderer.on('ext-create-tab', (_, d) => cb(d)),
+  onExtRemoveTab:       (cb)  => ipcRenderer.on('ext-remove-tab', (_, id) => cb(id)),
+  onExtSelectTab:       (cb)  => ipcRenderer.on('ext-select-tab', (_, id) => cb(id)),
   initState:    __divoInitState,
   initHistory:  __divoInitHistory,
   historySave:  (h) => ipcRenderer.invoke('history-save', h),

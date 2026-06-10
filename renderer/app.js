@@ -199,6 +199,14 @@ function wv() {
   return (key && pageWebviews.get(key)) || webview
 }
 
+// Informe le cadre d'extensions (chrome.tabs/windows) de l'onglet actif —
+// nécessaire pour que le badge/popup d'uBlock Origin reflète le bon onglet.
+function notifyExtTabActivated() {
+  const el = wv()
+  if (!el || el.getAttribute('partition') !== 'persist:divo' || !el.__ready) return
+  try { window.bridge.extTabActivated(el.getWebContentsId()) } catch {}
+}
+
 // ── Virtual list — rend uniquement les items visibles
 const ITEM_H = 30
 
@@ -545,7 +553,7 @@ function wireWebviewEvents(el) {
 
   el.addEventListener('dom-ready', () => {
     el.__ready = true
-    if (el === wv()) { webviewReady = true; updateNavButtons() }
+    if (el === wv()) { webviewReady = true; updateNavButtons(); notifyExtTabActivated() }
     const domUrl = el.getURL()
     if (!domUrl || domUrl === 'about:blank') return
     // Empêcher les sites de détecter qu'ils sont en arrière-plan (évite YouTube qui se met en pause)
@@ -959,6 +967,7 @@ function navigate(url, preserveContent = false) {
 
   // Afficher uniquement le webview de cet onglet, cacher tous les autres
   for (const [k, v] of pageWebviews) v.style.display = k === key ? '' : 'none'
+  notifyExtTabActivated()
 
   const wvEl = pageWebviews.get(key)
   if (wvEl) {
@@ -3133,6 +3142,31 @@ if (savedWidth) { sidebar.style.width = savedWidth + 'px'; sidebar.style.minWidt
 
 window.bridge.onFullscreenChange(isFS => document.body.classList.toggle('fullscreen', isFS))
 window.bridge.onOpenNewTab(url => { if (url) createTab(url) })
+
+// ── Pont chrome.tabs/windows pour les extensions (uBlock Origin, etc.)
+window.bridge.onExtCreateTab(({ requestId, url, active }) => {
+  createTab(url || null)
+  const id = activeTabId
+  const wvEl = pageWebviews.get(id)
+  const send = () => {
+    try { window.bridge.extCreateTabResult(requestId, wvEl.getWebContentsId()) }
+    catch { setTimeout(send, 50) }
+  }
+  if (wvEl?.__ready) send()
+  else wvEl?.addEventListener('dom-ready', send, { once: true })
+})
+
+window.bridge.onExtRemoveTab(webContentsId => {
+  for (const [tabId, wvEl] of pageWebviews) {
+    try { if (wvEl.getWebContentsId() === webContentsId) { closeTab(tabId); break } } catch {}
+  }
+})
+
+window.bridge.onExtSelectTab(webContentsId => {
+  for (const [tabId, wvEl] of pageWebviews) {
+    try { if (wvEl.getWebContentsId() === webContentsId) { activateTab(tabId); break } } catch {}
+  }
+})
 
 loadState(); loadHistory(); loadSessions(); loadPasswords(); render(); startArchiveTimer(); startScrollSaver()
 setInterval(autoSuspendCheck, 5 * 60 * 1000)

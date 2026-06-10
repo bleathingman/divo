@@ -1,6 +1,6 @@
 {
   "name": "divo",
-  "version": "4.0.6",
+  "version": "4.1.0",
   "description": "Divo Browser",
   "author": "Divh",
   "main": "main.js",
@@ -36,13 +36,29 @@
       "ext-sw-polyfill.js",
       "renderer/**/*",
       "assets/**/*",
-      "node_modules/electron-chrome-web-store/dist/**/*"
+      "node_modules/electron-chrome-web-store/dist/**/*",
+      "node_modules/electron-chrome-extensions/dist/**/*"
     ],
     "win": {
       "target": [
-        { "target": "nsis",     "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] },
-        { "target": "appx",     "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "appx",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "${productName}.${version}.${ext}",
       "icon": "assets/icon.png",
@@ -159,6 +175,7 @@
     }
   },
   "dependencies": {
+    "electron-chrome-extensions": "^4.9.0",
     "electron-chrome-web-store": "^0.13.0",
     "electron-updater": "^6.3.9"
   }

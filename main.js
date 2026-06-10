@@ -4,6 +4,7 @@ const fs   = require('fs')
 const { spawn } = require('child_process')
 const crypto = require('crypto')
 const { installChromeWebStore, installExtension, uninstallExtension } = require('electron-chrome-web-store')
+const { ElectronChromeExtensions } = require('electron-chrome-extensions')
 
 // ── Crash logging
 const LOG_PATH = path.join(app.getPath('userData'), 'crash.log')
@@ -27,6 +28,11 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 let mainWindow
 const downloadItems = new Map()
 const pendingPerms  = new Map()
+
+// ── Cadre d'extensions Chrome (chrome.tabs/windows/browserAction/contextMenus...)
+let chromeExtensions = null
+const pendingTabCreations = new Map()
+let nextCreateTabRequestId = 1
 
 // Protocoles autorisés dans le webview — tout le reste → shell.openExternal()
 const SAFE_PROTOS = new Set(['http:', 'https:', 'divo:', 'file:', 'chrome:'])
@@ -747,14 +753,26 @@ function patchMv3ToMv2(dir, manifest) {
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(patched, null, 2))
 }
 
+// uBlock Origin (CWS) — installé automatiquement comme moteur de blocage principal,
+// en complément du filtrage maison (CSS/cosmétique + scripts YouTube/Twitch).
+const UBLOCK_ORIGIN_ID = 'cjpalhdlnbpafiamejdnhcphjbkeiagm'
+
+// uBlock Origin ne tourne que sur persist:divo : c'est là que chrome.webRequest
+// bloque le réseau et que le preload electron-chrome-extensions (chrome.browserAction,
+// contextMenus, privacy, webNavigation...) est enregistré. Les autres extensions
+// restent chargées sur toutes les sessions protégées comme avant.
+function extensionSessions(extId) {
+  return extId === UBLOCK_ORIGIN_ID ? [session.fromPartition('persist:divo')] : getProtectedSessions()
+}
+
 // Installe une extension via electron-chrome-web-store
 async function installExtensionById(extId) {
   const ext = await installExtension(extId, {
     session: session.fromPartition('persist:divo'),
     extensionsPath: USER_EXT_DIR,
   })
-  const dir = path.join(USER_EXT_DIR, extId)
-  for (const s of getProtectedSessions()) {
+  const dir = findExtDir(path.join(USER_EXT_DIR, extId))
+  for (const s of extensionSessions(extId)) {
     try { await s.extensions.loadExtension(dir, { allowFileAccess: false }) } catch {}
   }
   if (!config.userExtensions) config.userExtensions = []
@@ -765,6 +783,18 @@ async function installExtensionById(extId) {
   return { id: extId, name: ext.name, version: ext.manifest?.version }
 }
 
+async function maybeAutoInstallUblock() {
+  if (!config.adblock) return
+  if (config.ublockOrigin === false) return
+  if ((config.userExtensions || []).some(e => e.id === UBLOCK_ORIGIN_ID)) return
+  try {
+    await installExtensionById(UBLOCK_ORIGIN_ID)
+    console.log('[ublock] uBlock Origin installé automatiquement')
+  } catch (e) {
+    console.warn('[ublock] auto-install échoué:', e.message)
+  }
+}
+
 // Charge toutes les extensions activées au démarrage
 async function loadUserExtensions() {
   const exts = config.userExtensions || []
@@ -773,11 +803,71 @@ async function loadUserExtensions() {
     const baseDir = path.join(USER_EXT_DIR, ext.id)
     const dir = findExtDir(baseDir)
     if (!fs.existsSync(path.join(dir, 'manifest.json'))) continue
-    for (const s of getProtectedSessions()) {
+    for (const s of extensionSessions(ext.id)) {
       try { await s.extensions.loadExtension(dir, { allowFileAccess: false }) } catch {}
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ── Cadre chrome.tabs/windows/browserAction/contextMenus pour persist:divo
+// ═══════════════════════════════════════════════════════════════
+// Fournit les API chrome.* manquantes du support natif d'Electron (browserAction,
+// contextMenus, privacy, webNavigation...), nécessaires au fonctionnement de
+// uBlock Origin et affiche son icône/popup via <browser-action-list>.
+function setupExtensionsFramework() {
+  const extSession = session.fromPartition('persist:divo')
+  ElectronChromeExtensions.handleCRXProtocol(session.defaultSession)
+  chromeExtensions = new ElectronChromeExtensions({
+    license: 'GPL-3.0',
+    session: extSession,
+    createTab(details) {
+      return new Promise((resolve, reject) => {
+        if (!mainWindow) { reject(new Error('Aucune fenêtre disponible')); return }
+        const requestId = nextCreateTabRequestId++
+        const timer = setTimeout(() => {
+          if (pendingTabCreations.delete(requestId)) reject(new Error('Timeout création onglet'))
+        }, 5000)
+        pendingTabCreations.set(requestId, { resolve, reject, timer })
+        mainWindow.webContents.send('ext-create-tab', {
+          requestId, url: details.url || null, active: details.active !== false,
+        })
+      })
+    },
+    selectTab(tab) {
+      mainWindow?.webContents.send('ext-select-tab', tab.id)
+    },
+    removeTab(tab) {
+      mainWindow?.webContents.send('ext-remove-tab', tab.id)
+    },
+    async createWindow() {
+      // Divo est mono-fenêtre : chrome.windows.create ouvre un nouvel onglet
+      // dans la fenêtre existante plutôt qu'une fenêtre OS séparée.
+      return mainWindow
+    },
+    removeWindow() {},
+  })
+}
+
+ipcMain.on('ext-tab-activated', (_, webContentsId) => {
+  if (!chromeExtensions) return
+  try {
+    const wc = webContents.fromId(webContentsId)
+    if (wc && !wc.isDestroyed()) chromeExtensions.selectTab(wc)
+  } catch {}
+})
+
+ipcMain.on('ext-create-tab-result', (_, { requestId, webContentsId }) => {
+  const pending = pendingTabCreations.get(requestId)
+  if (!pending) return
+  pendingTabCreations.delete(requestId)
+  clearTimeout(pending.timer)
+  try {
+    const wc = webContents.fromId(webContentsId)
+    if (wc && !wc.isDestroyed()) pending.resolve([wc, mainWindow])
+    else pending.reject(new Error('webContents introuvable'))
+  } catch (e) { pending.reject(e) }
+})
 
 // ── IPC extensions
 ipcMain.handle('get-user-extensions', () => {
@@ -823,6 +913,8 @@ ipcMain.handle('remove-user-extension', async (_, extId) => {
   try { fs.rmSync(path.join(USER_EXT_DIR, extId), { recursive: true, force: true }) } catch {}
   // Retirer de la config
   config.userExtensions = (config.userExtensions || []).filter(e => e.id !== extId)
+  // Empêche la réinstallation automatique au prochain démarrage
+  if (extId === UBLOCK_ORIGIN_ID) config.ublockOrigin = false
   saveConfig()
   return { ok: true }
 })
@@ -925,7 +1017,12 @@ function setupCsp() {
 }
 
 function setupAdblocker() {
+  // uBlock Origin est le moteur de blocage réseau principal sur persist:divo
+  // (chrome.webRequest côté extension) — enregistrer aussi un handler webRequest
+  // applicatif sur cette session empêcherait les listeners de l'extension de se
+  // déclencher (limitation documentée d'Electron : un seul handler par session/event).
   for (const s of getProtectedSessions()) {
+    if (s === session.fromPartition('persist:divo')) continue
     s.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, adblockHandler)
   }
 }
@@ -1601,10 +1698,9 @@ app.whenReady().then(async () => {
   initBlocklist()
   setupAdblocker()
   setupCsp()
+  setupExtensionsFramework()
   await setupChromeWebStore()
 
-  // ── Extensions utilisateur
-  await loadUserExtensions()
   // ── Téléchargements — appliqués sur toutes les sessions (persist:divo + private:incognito)
   const safeFilename = raw =>
     path.basename(String(raw || 'download'))
@@ -1699,6 +1795,16 @@ app.whenReady().then(async () => {
     }
 
     if (contents.getType() === 'webview') {
+      // Enregistrer l'onglet auprès de chrome.tabs/windows (uBlock Origin et autres
+      // extensions) — uniquement sur persist:divo, seule session équipée du cadre
+      // electron-chrome-extensions.
+      if (chromeExtensions && contents.session === session.fromPartition('persist:divo')) {
+        chromeExtensions.addTab(contents, mainWindow)
+        contents.once('destroyed', () => {
+          try { chromeExtensions.removeTab(contents) } catch {}
+        })
+      }
+
       // Liens custom protocol (steam://, discord://, epic://, etc.) → ouvrir dans l'OS
       contents.on('will-navigate', (event, url) => {
         try {
@@ -1848,6 +1954,10 @@ app.whenReady().then(async () => {
 
   createWindow()
 
+  // ── Extensions utilisateur (après chargement du profil, pour persister la config au bon endroit)
+  await loadUserExtensions()
+  maybeAutoInstallUblock().catch(e => console.warn('[ublock]', e.message))
+
   // ── macOS : menu système (indispensable pour Cmd+C/V/Z/A dans les champs texte)
   if (process.platform === 'darwin') {
     const { Menu } = require('electron')
@@ -1918,7 +2028,12 @@ ipcMain.on('answer-permission',  (_, key, granted) => {
 
 // ── Adblock IPC
 ipcMain.handle('adblock-status', () => config.adblock)
-ipcMain.handle('adblock-toggle', (_, enabled) => { config.adblock = !!enabled; saveConfig(); return config.adblock })
+ipcMain.handle('adblock-toggle', (_, enabled) => {
+  config.adblock = !!enabled
+  saveConfig()
+  if (config.adblock) maybeAutoInstallUblock().catch(e => console.warn('[ublock]', e.message))
+  return config.adblock
+})
 ipcMain.handle('is-default-browser', () => app.isDefaultProtocolClient('https') || app.isDefaultProtocolClient('http'))
 ipcMain.handle('set-default-browser', async () => {
   const { response } = await dialog.showMessageBox(mainWindow, {
