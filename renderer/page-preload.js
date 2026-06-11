@@ -1,12 +1,6 @@
 // Sandboxed preload (contextIsolation: true, sandbox: true)
 // Tourne AVANT tout script de la page — injecte le patch fetch dans le monde principal
 // Le guard window.__dvE empêche la double-exécution si dom-ready l'injecte aussi après.
-const { contextBridge, ipcRenderer } = require('electron')
-
-contextBridge.exposeInMainWorld('__divoNotify', (title, body, icon, tag) => {
-  try { ipcRenderer.send('divo-notification', { title, body, icon, tag }) } catch {}
-})
-
 ;(function () {
   try {
     var href = location.href || ''

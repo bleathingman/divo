@@ -606,20 +606,6 @@ function wireWebviewEvents(el) {
       `).catch(() => {})
     }
     if (!isSpecial(url)) {
-      el.executeJavaScript(`(function(){
-        if (!window.__divoNotify || window.__divoNotifPatched) return;
-        window.__divoNotifPatched = true;
-        function DivoNotif(title, opts) {
-          opts = opts || {};
-          window.__divoNotify(String(title||''), String(opts.body||''), String(opts.icon||''), String(opts.tag||''));
-        }
-        DivoNotif.permission = 'granted';
-        DivoNotif.requestPermission = function() { return Promise.resolve('granted'); };
-        DivoNotif.prototype.addEventListener = function(){};
-        DivoNotif.prototype.removeEventListener = function(){};
-        DivoNotif.prototype.close = function(){};
-        window.Notification = DivoNotif;
-      })()`).catch(() => {})
       const tab = tabs.find(t => t.id === el.__key)
       addToHistory(url, el.getTitle(), tab?.favicon || null)
       if (tab?._resumeScroll && tab.scrollY > 0) {
@@ -3239,13 +3225,6 @@ window.bridge.onNotDefaultBrowser(() => {
   if (!localStorage.getItem('default-browser-dismissed')) defaultBrowserBar.classList.add('visible')
 })
 
-window.bridge.onNotificationClick(wcId => {
-  for (const [tabId, wvEl] of pageWebviews) {
-    try {
-      if (wvEl.getWebContentsId() === wcId) { activateTab(tabId); return }
-    } catch {}
-  }
-})
 defaultBrowserSet.addEventListener('click', () => {
   window.bridge.setDefaultBrowser()
   defaultBrowserBar.classList.remove('visible')
