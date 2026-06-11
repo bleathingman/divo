@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dialog, net, Notification: ElectronNotification } = require('electron')
+const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dialog, Notification: ElectronNotification } = require('electron')
 const path = require('path')
 const fs   = require('fs')
 const { spawn } = require('child_process')
@@ -36,20 +36,6 @@ let nextCreateTabRequestId = 1
 
 // Protocoles autorisés dans le webview — tout le reste → shell.openExternal()
 const SAFE_PROTOS = new Set(['http:', 'https:', 'divo:', 'file:', 'chrome:'])
-
-// Domaines jamais bloqués par l'adblocker (infrastructure légitime)
-const ADBLOCK_NEVER_BLOCK = new Set([
-  'google.com', 'googleapis.com', 'gstatic.com', 'googleusercontent.com',
-  'googlevideo.com', 'google.fr', 'google.co.uk', 'google.de', 'google.ca',
-  'google.es', 'google.it', 'google.com.br', 'google.com.au', 'google.co.jp',
-  'apple.com', 'icloud.com', 'aaplimg.com',
-  'microsoft.com', 'microsoftonline.com', 'live.com', 'office.com',
-  'cloudflare.com', 'cloudflare-dns.com',
-  'fastly.net', 'akamaized.net', 'akamai.net',
-  // GitHub — requis pour electron-updater (api.github.com, releases, assets)
-  'github.com', 'api.github.com', 'githubusercontent.com', 'github-releases.githubusercontent.com',
-  'objects.githubusercontent.com', 'release-assets.githubusercontent.com',
-])
 
 const WEBVIEW_SHORTCUTS = new Set([
   'ctrl+KeyT', 'ctrl+shift+KeyT', 'ctrl+shift+KeyN', 'ctrl+KeyW',
@@ -350,160 +336,6 @@ ipcMain.handle('edit-active-profile', (_, data) => {
 
 ipcMain.handle('history-save', (_, h) => { cachedHistory = h; writeHistory(h) })
 ipcMain.on('history-load-sync', e => { e.returnValue = cachedHistory })
-
-// ── Adblocker (uBlock Origin-style)
-const BL_DIR = app.getPath('userData')
-const BL_VER = 'v6'
-const BL_DOMAINS_FILE  = path.join(BL_DIR, `bl_${BL_VER}_domains.txt`)
-const BL_COSMETIC_FILE = path.join(BL_DIR, `bl_${BL_VER}_cosmetic.json`)
-const BL_TTL = 7 * 24 * 60 * 60 * 1000
-
-let blockedDomains     = new Set()
-let cosmeticGenericCSS = ''           // sélecteurs CSS génériques (sans déclaration)
-const cosmeticByDomain = new Map()    // "example.com" → ["#ad", ".banner", …]
-
-// Filtre les pseudo-classes uBlock/ABP non natives (navigateur ne les comprend pas)
-function isNativeSelector(sel) {
-  // Rejette toute tentative d'injection CSS via accolades ou commentaires
-  if (/[{}]|\/\*|\*\//.test(sel)) return false
-  const ext = [':has-text(', ':upward(', ':xpath(', ':matches-css(', ':-abp-',
-               ':if(', ':if-not(', '+js(', ':watch-attr(', ':min-text-length(',
-               ':matches-path(', ':others(']
-  return !ext.some(s => sel.includes(s))
-}
-
-function addDomain(d) {
-  const clean = d.trim().toLowerCase().replace(/^\*\./, '')
-  if (clean.includes('.') && clean !== 'localhost' && !/^\d+\.\d+\.\d+/.test(clean))
-    blockedDomains.add(clean)
-}
-
-// Parse liste de domaines (format oisd / hosts)
-function parseDomainText(text) {
-  for (const line of text.split('\n')) {
-    const t = line.trim()
-    if (!t || t[0] === '#' || t[0] === '!') continue
-    addDomain(t.split(/\s+/).pop())
-  }
-}
-
-// Parse liste ABP/EasyList → domaines réseau + règles cosmétiques
-// parseNetRules=false : cosmétiques seulement (évite que EasyList bloque des services légitimes)
-function parseAbpList(text, domainSet, genericSels, domainSels, parseNetRules = true) {
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('!') || line.startsWith('[')) continue
-    // Ignore exceptions, extended CSS, scriptlets
-    if (line.startsWith('@@') || line.includes('#?#') || line.includes('#@#') || line.includes('#$#')) continue
-
-    // Cosmétique générique : ##sélecteur
-    if (line.startsWith('##')) {
-      const sel = line.slice(2).trim()
-      if (sel && isNativeSelector(sel)) genericSels.push(sel)
-      continue
-    }
-
-    // Cosmétique par domaine : domaines##sélecteur
-    const hh = line.indexOf('##')
-    if (hh > 0) {
-      const sel = line.slice(hh + 2).trim()
-      if (!sel || !isNativeSelector(sel)) continue
-      for (const raw of line.slice(0, hh).split(',')) {
-        const d = raw.trim().toLowerCase().replace(/^www\./, '')
-        if (!d || d.startsWith('~') || d.includes('/') || !d.includes('.')) continue
-        const arr = domainSels.get(d) || []; arr.push(sel); domainSels.set(d, arr)
-      }
-      continue
-    }
-
-    // Règle réseau : extraire domaine depuis ||domaine^
-    if (parseNetRules) {
-      let rule = line
-      if (line.includes('$')) rule = line.slice(0, line.lastIndexOf('$'))
-      if (rule.startsWith('||')) {
-        const inner = rule.slice(2).split(/[\^\/\?]/)[0].toLowerCase()
-        if (inner && inner.includes('.') && /^[a-z0-9._-]+$/.test(inner)) domainSet.add(inner)
-      }
-    }
-  }
-}
-
-// Renvoie le CSS cosmétique à injecter pour un hostname donné
-function getPageCosmeticCSS(hostname) {
-  const host  = hostname.replace(/^www\./, '').toLowerCase()
-  const parts = host.split('.')
-  const sels  = []
-  for (let i = 0; i < parts.length - 1; i++) {
-    const rules = cosmeticByDomain.get(parts.slice(i).join('.'))
-    if (rules) sels.push(...rules)
-  }
-  return sels.length ? sels.join(',\n') + ' { display: none !important; }' : ''
-}
-
-async function refreshFilterLists() {
-  try {
-    const newDomains    = new Set()
-    const newGeneric    = []
-    const newByDomain   = new Map()
-
-    // Téléchargement en parallèle
-    const [domRes, elRes] = await Promise.allSettled([
-      net.fetch('https://big.oisd.nl/domainswild'),
-      net.fetch('https://easylist.to/easylist/easylist.txt')
-    ])
-
-    if (domRes.status === 'fulfilled' && domRes.value.ok) {
-      const text = await domRes.value.text()
-      for (const line of text.split('\n')) {
-        const t = line.trim()
-        if (!t || t[0] === '#' || t[0] === '!') continue
-        const d = t.split(/\s+/).pop().toLowerCase().replace(/^\*\./, '')
-        if (d.includes('.') && d !== 'localhost' && !/^\d+\.\d+\.\d+/.test(d)) newDomains.add(d)
-      }
-    }
-
-    if (elRes.status === 'fulfilled' && elRes.value.ok) {
-      // parseNetRules=false : on utilise EasyList pour les cosmétiques uniquement,
-      // OISD couvre déjà le blocage réseau sans risquer des faux-positifs Google/CDN
-      parseAbpList(await elRes.value.text(), newDomains, newGeneric, newByDomain, false)
-    }
-
-    // Sauvegarde
-    fs.writeFileSync(BL_DOMAINS_FILE, [...newDomains].join('\n'), 'utf-8')
-    fs.writeFileSync(BL_COSMETIC_FILE, JSON.stringify({
-      generic:  newGeneric.slice(0, 6000),
-      byDomain: Object.fromEntries(newByDomain)
-    }), 'utf-8')
-
-    // Application immédiate
-    blockedDomains     = newDomains
-    cosmeticGenericCSS = newGeneric.slice(0, 6000).join(',\n')
-    cosmeticByDomain.clear()
-    for (const [k, v] of newByDomain) cosmeticByDomain.set(k, v)
-
-    console.log(`[adblock] ${blockedDomains.size} domaines, ${cosmeticByDomain.size} règles cosmétiques domaine`)
-  } catch (e) { console.error('[adblock] refresh error', e) }
-}
-
-function initBlocklist() {
-  // Chargement rapide depuis le cache
-  if (fs.existsSync(BL_DOMAINS_FILE)) {
-    try {
-      blockedDomains = new Set(fs.readFileSync(BL_DOMAINS_FILE, 'utf-8').split('\n').filter(Boolean))
-    } catch {}
-  }
-  if (fs.existsSync(BL_COSMETIC_FILE)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(BL_COSMETIC_FILE, 'utf-8'))
-      cosmeticGenericCSS = (data.generic || []).join(',\n')
-      for (const [k, v] of Object.entries(data.byDomain || {})) cosmeticByDomain.set(k, v)
-    } catch {}
-  }
-
-  const needsRefresh = !fs.existsSync(BL_DOMAINS_FILE) || !fs.existsSync(BL_COSMETIC_FILE) ||
-    Date.now() - fs.statSync(BL_DOMAINS_FILE).mtimeMs > BL_TTL
-  if (needsRefresh) refreshFilterLists()
-}
 
 // Sessions qui hébergent des webviews — les handlers de sécurité doivent couvrir toutes.
 const PROTECTED_PARTITIONS = ['persist:divo', 'private:incognito']
@@ -959,7 +791,7 @@ function cspHandler(details, callback) {
   callback({ responseHeaders: headers })
 }
 
-function adblockHandler(details, callback) {
+function httpsUpgradeHandler(details, callback) {
   // Ne jamais bloquer ni upgrader les requêtes d'extensions
   if (details.url.startsWith('chrome-extension://') ||
       (details.initiator && details.initiator.startsWith('chrome-extension://'))) {
@@ -975,24 +807,6 @@ function adblockHandler(details, callback) {
       }
     } catch {}
   }
-  if (!config.adblock || !blockedDomains.size || details.resourceType === 'mainFrame') {
-    callback({}); return
-  }
-  const scheme = details.url.split(':')[0]
-  if (scheme === 'divo' || scheme === 'file' || scheme === 'chrome-extension') {
-    callback({}); return
-  }
-  try {
-    const parts = new URL(details.url).hostname.toLowerCase().split('.')
-    // Whitelist : ne jamais bloquer l'infrastructure légitime
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (ADBLOCK_NEVER_BLOCK.has(parts.slice(i).join('.'))) { callback({}); return }
-    }
-    // Blocklist
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (blockedDomains.has(parts.slice(i).join('.'))) { callback({ cancel: true }); return }
-    }
-  } catch {}
   callback({})
 }
 
@@ -1019,206 +833,16 @@ function setupCsp() {
   }
 }
 
-function setupAdblocker() {
+function setupHttpsUpgrade() {
   // uBlock Origin est le moteur de blocage réseau principal sur persist:divo
   // (chrome.webRequest côté extension) — enregistrer aussi un handler webRequest
   // applicatif sur cette session empêcherait les listeners de l'extension de se
   // déclencher (limitation documentée d'Electron : un seul handler par session/event).
   for (const s of getProtectedSessions()) {
     if (s === session.fromPartition('persist:divo')) continue
-    s.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, adblockHandler)
+    s.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, httpsUpgradeHandler)
   }
 }
-
-// ── CSS anti-pub générique (toutes les pages)
-const GENERIC_AD_CSS = `
-  ins.adsbygoogle, .adsbygoogle, [data-ad-slot], [data-ad-client],
-  [id^="div-gpt-ad"], [id*="google_ads_iframe"], [id*="AdSense"],
-  [class*="adsbygoogle"], [class*="google-ads"], [class*="googleads"],
-  iframe[src*="googlesyndication"], iframe[src*="doubleclick"],
-  iframe[src*="adnxs.com"], iframe[src*="taboola"], iframe[src*="outbrain"],
-  iframe[src*="mgid.com"], iframe[src*="revcontent"], iframe[src*="popads"],
-  iframe[src*="popcash"], iframe[src*="exoclick"], iframe[src*="trafficjunky"],
-  .ad-container, .ads-container, .ad-wrapper, .ad-banner, .ad-slot,
-  .ad-unit, .advertisement, .advert, #carbonads, .carbonads,
-  [class*="pub_300x"], [class*="pub_728x"], [class*="pub_160x"],
-  .overlay-ads, .popup-ad, .popunder-ad { display: none !important; }
-`
-
-// ── YouTube ad blocker
-const YT_AD_CSS = `
-  .ytp-ad-overlay-container, .ytp-ad-image-overlay, .ytp-ad-text-overlay,
-  .ytp-ad-player-overlay, .ytp-ad-module, .ytp-ad-player-overlay-layout,
-  .ytp-ad-player-overlay-skip-or-preview, .ytp-ad-button-icon,
-  .ytp-ad-action-interstitial, .ytp-ad-action-interstitial-slot,
-  .ytp-suggested-action-badge, .ytp-suggested-action-badge-expanded,
-  ytd-action-companion-ad-renderer, ytd-ad-slot-renderer,
-  ytd-promoted-sparkles-web-renderer, ytd-promoted-video-renderer,
-  ytd-search-pyv-renderer, ytd-display-ad-renderer,
-  ytd-promoted-sparkles-text-search-renderer, ytd-statement-banner-renderer,
-  ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
-  ytd-in-feed-ad-layout-renderer, ytd-banner-promo-renderer,
-  ytd-video-masthead-ad-v3-renderer, ytd-primetime-promo-renderer,
-  ytd-compact-promoted-video-renderer, ytd-mealbar-promo-renderer,
-  ytd-enforcement-message-view-model,
-  tp-yt-paper-dialog:has(ytd-enforcement-message-view-model),
-  #player-ads, #masthead-ad, .ytd-banner-promo-renderer { display: none !important; }
-`
-const YT_AD_JS = `(function(){
-  if (window.__dv) return; window.__dv = 1;
-
-  function dismissEnforcement() {
-    var btns = document.querySelectorAll(
-      'ytd-enforcement-message-view-model button, ' +
-      'tp-yt-paper-dialog ytd-button-renderer button, ' +
-      'ytd-mealbar-promo-renderer #dismiss-button button, ' +
-      'ytd-mealbar-promo-renderer button[aria-label]'
-    );
-    for (var i = 0; i < btns.length; i++) {
-      if (btns[i].offsetParent !== null) { btns[i].click(); return true; }
-    }
-    return false;
-  }
-
-  function skip() {
-    if (dismissEnforcement()) return;
-
-    // Bouton "Passer l'annonce" — sélecteurs 2024/2025
-    var btn = document.querySelector(
-      '.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, ' +
-      '.ytp-ad-skip-button-slot button, button[class*="skip"]'
-    );
-    if (btn) { btn.click(); return; }
-
-    var vid = document.querySelector('video');
-    if (!vid) return;
-
-    // Détection via .ad-showing sur <html> (la plus fiable, stable depuis 2020)
-    var isAd =
-      document.documentElement.classList.contains('ad-showing') ||
-      document.documentElement.classList.contains('ad-interrupting') ||
-      !!document.querySelector(
-        '.ytp-ad-player-overlay-instream-info, .ytp-ad-simple-ad-badge, ' +
-        '.ytp-ad-preview-container, .ytp-ad-player-overlay-layout'
-      );
-
-    if (isAd) {
-      if (vid.playbackRate !== 16) {
-        if (window.__dvRate === undefined) window.__dvRate = vid.playbackRate;
-        vid.playbackRate = 16;
-      }
-      if (!vid.muted) { window.__dvWasMuted = false; vid.muted = true; }
-      if (isFinite(vid.duration) && vid.duration > 0)
-        vid.currentTime = vid.duration - 0.01;
-    } else if (window.__dvRate !== undefined) {
-      vid.playbackRate = window.__dvRate;
-      window.__dvRate = undefined;
-      if (!window.__dvWasMuted) vid.muted = false;
-      window.__dvWasMuted = undefined;
-    }
-  }
-
-  // Observe changements DOM + attributs de classe (pour .ad-showing)
-  new MutationObserver(skip).observe(document.documentElement, {
-    childList: true, subtree: true,
-    attributes: true, attributeFilter: ['class']
-  });
-
-  // Polling de sécurité : MutationObserver peut manquer certains états transitoires
-  setInterval(skip, 100);
-
-  // YouTube SPA : chaque navigation vidéo déclenche cet événement
-  window.__dvSkip = skip;
-  document.addEventListener('yt-navigate-finish', skip);
-  skip();
-})()`
-
-// ── YouTube : injection précoce (dom-ready) — intercepte l'API player avant YouTube
-const YT_EARLY_JS = `(function(){
-  if (window.__dvE) return; window.__dvE = 1;
-
-  var AD_KEYS = ['adPlacements','playerAds','adSlots','adBreakHeartbeatParams',
-                 'externalAdsConfig','auxiliaryUi','paidContentOverlay',
-                 'adCpns','adMetadata'];
-
-  function cleanYT(obj, d) {
-    if (!obj || typeof obj !== 'object' || d > 8) return;
-    if (Array.isArray(obj)) {
-      for (var i = 0; i < obj.length; i++) cleanYT(obj[i], d + 1);
-      return;
-    }
-    for (var i = 0; i < AD_KEYS.length; i++) delete obj[AD_KEYS[i]];
-    if (obj.playabilityStatus && obj.playabilityStatus.status &&
-        obj.playabilityStatus.status !== 'OK' &&
-        obj.playabilityStatus.status !== 'LIVE_STREAM_OFFLINE' &&
-        obj.playabilityStatus.status !== 'LOGIN_REQUIRED') {
-      if (!obj.playabilityStatus.reason) obj.playabilityStatus.status = 'OK';
-    }
-    for (var k in obj) {
-      if (obj.hasOwnProperty(k) && obj[k] && typeof obj[k] === 'object') {
-        cleanYT(obj[k], d + 1);
-      }
-    }
-  }
-
-  // Nettoyer ytInitialPlayerResponse déjà posé par les scripts inline du HTML
-  try {
-    var cur = window.ytInitialPlayerResponse;
-    if (cur) cleanYT(cur, 0);
-    Object.defineProperty(window, 'ytInitialPlayerResponse', {
-      get: function() { return cur; },
-      set: function(v) { cleanYT(v, 0); cur = v; },
-      configurable: true
-    });
-  } catch {}
-
-  // Intercepter fetch pour /youtubei/v1/player et /youtubei/v1/next
-  var _f = window.fetch;
-  window.fetch = function(input, init) {
-    var url = typeof input === 'string' ? input : (input && input.url) || '';
-    var p = _f.apply(this, arguments);
-    if (!url.includes('/youtubei/v1/player') && !url.includes('/youtubei/v1/next')) return p;
-    return p.then(function(resp) {
-      var fallback = resp.clone();
-      return resp.text().then(function(text) {
-        try {
-          var json = JSON.parse(text);
-          cleanYT(json, 0);
-          var h = {};
-          resp.headers.forEach(function(v, k) {
-            if (k !== 'content-encoding' && k !== 'content-length' && k !== 'transfer-encoding') h[k] = v;
-          });
-          return new Response(JSON.stringify(json), { status: resp.status, statusText: resp.statusText, headers: h });
-        } catch { return fallback; }
-      }).catch(function() { return fallback; });
-    });
-  };
-})()`
-
-// ── Twitch ad blocker
-const TWITCH_AD_CSS = `
-  .video-ad-label, .tw-c-text-overlay, .ad-banner, .tw-ad,
-  div[data-a-target="video-ad-countdown"], div[data-a-target="stream-ad-badge"],
-  .player-ad-overlay, .tw-popover__bubble[style*="opacity: 1"] { display: none !important; }
-`
-const TWITCH_AD_JS = `(function(){
-  if (window.__dv_tw) return; window.__dv_tw = 1;
-  let adMuted = false;
-  function checkAd() {
-    const isAd = !!(
-      document.querySelector(
-        '.video-ad-label, [data-a-target="video-ad-countdown"], ' +
-        '[data-a-target="stream-ad-badge"], .player-ad-overlay'
-      )
-    );
-    const vid = document.querySelector('video');
-    if (!vid) return;
-    if (isAd && !adMuted)  { vid.muted = true;  adMuted = true; }
-    if (!isAd && adMuted)  { vid.muted = false; adMuted = false; }
-  }
-  setInterval(checkAd, 500);
-  new MutationObserver(checkAd).observe(document.documentElement, { childList: true, subtree: true });
-})()`
 
 // ── Web dark mode dynamique (inspiré Dark Reader)
 function dynamicDark() {
@@ -1698,8 +1322,7 @@ async function maybeOpenExternal(url, originHostname) {
 }
 
 app.whenReady().then(async () => {
-  initBlocklist()
-  setupAdblocker()
+  setupHttpsUpgrade()
   setupCsp()
   setupExtensionsFramework()
   await setupChromeWebStore()
@@ -1835,39 +1458,9 @@ app.whenReady().then(async () => {
         }
       })
 
-      contents.on('dom-ready', () => {
-        if (!config.adblock) return
-        const url = contents.getURL()
-        if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
-          contents.executeJavaScript(YT_EARLY_JS).catch(() => {})
-        }
-      })
-
       contents.on('did-finish-load', () => {
         const url = contents.getURL()
         if (!url || url === 'about:blank' || url.startsWith('chrome') || url.startsWith('arc') || url.startsWith('file')) return
-
-        if (config.adblock) {
-          // CSS génériques (curatés + EasyList)
-          contents.insertCSS(GENERIC_AD_CSS).catch(() => {})
-          if (cosmeticGenericCSS) {
-            contents.insertCSS(cosmeticGenericCSS + ' { display: none !important; }').catch(() => {})
-          }
-          // CSS cosmétiques spécifiques au domaine
-          try {
-            const domCSS = getPageCosmeticCSS(new URL(url).hostname)
-            if (domCSS) contents.insertCSS(domCSS).catch(() => {})
-          } catch {}
-          // Sites spécifiques
-          if (url.includes('youtube.com') || url.includes('youtu.be')) {
-            contents.insertCSS(YT_AD_CSS).catch(() => {})
-            contents.executeJavaScript(YT_AD_JS).catch(() => {})
-          }
-          if (url.includes('twitch.tv')) {
-            contents.insertCSS(TWITCH_AD_CSS).catch(() => {})
-            contents.executeJavaScript(TWITCH_AD_JS).catch(() => {})
-          }
-        }
 
         // Boutons souris 4 (retour) et 5 (avant) — injectés dans chaque page
         contents.executeJavaScript(`(function(){
@@ -1891,20 +1484,11 @@ app.whenReady().then(async () => {
         }
       })
 
-      // Navigation SPA : re-injecter CWS + YouTube + dark mode
+      // Navigation SPA : re-injecter CWS + dark mode
       contents.on('did-navigate-in-page', (_, url, isMainFrame) => {
         if (!isMainFrame || !url || url.startsWith('divo:')) return
         if (url.includes('chromewebstore.google.com/detail/')) {
           if (!contents.isDestroyed()) contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
-        }
-        if (config.adblock && (url.includes('youtube.com') || url.includes('youtu.be'))) {
-          // Pas de ré-insertion de YT_AD_CSS ici : le CSS posé au did-finish-load
-          // persiste à travers les navigations SPA (même document) — le réinjecter
-          // à chaque vidéo empilait une feuille de style supplémentaire à chaque
-          // fois (fuite mémoire qui grossissait au fil du visionnage).
-          contents.executeJavaScript(
-            'clearTimeout(window.__dvSkipT);window.__dvSkipT=setTimeout(function(){if(window.__dvSkip)window.__dvSkip();},200)'
-          ).catch(() => {})
         }
         if (!config.webDarkMode || url.startsWith('chrome-extension:')) return
         try {
@@ -1926,14 +1510,6 @@ app.whenReady().then(async () => {
             return { action: 'deny' }
           }
         } catch {}
-        if (config.adblock && url) {
-          try {
-            const parts = new URL(url).hostname.toLowerCase().split('.')
-            for (let i = 0; i < parts.length - 1; i++) {
-              if (blockedDomains.has(parts.slice(i).join('.'))) return { action: 'deny' }
-            }
-          } catch {}
-        }
         if (mainWindow && url) {
           if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false)
           mainWindow.webContents.send('open-new-tab', url)
