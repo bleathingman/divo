@@ -1898,7 +1898,10 @@ app.whenReady().then(async () => {
           if (!contents.isDestroyed()) contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
         }
         if (config.adblock && (url.includes('youtube.com') || url.includes('youtu.be'))) {
-          contents.insertCSS(YT_AD_CSS).catch(() => {})
+          // Pas de ré-insertion de YT_AD_CSS ici : le CSS posé au did-finish-load
+          // persiste à travers les navigations SPA (même document) — le réinjecter
+          // à chaque vidéo empilait une feuille de style supplémentaire à chaque
+          // fois (fuite mémoire qui grossissait au fil du visionnage).
           contents.executeJavaScript(
             'clearTimeout(window.__dvSkipT);window.__dvSkipT=setTimeout(function(){if(window.__dvSkip)window.__dvSkip();},200)'
           ).catch(() => {})
