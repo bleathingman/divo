@@ -28,6 +28,7 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 let mainWindow
 const downloadItems = new Map()
 const pendingPerms  = new Map()
+const peekWindows   = new Set()
 
 // ── Cadre d'extensions Chrome (chrome.tabs/windows/browserAction/contextMenus...)
 let chromeExtensions = null
@@ -36,6 +37,41 @@ let nextCreateTabRequestId = 1
 
 // Protocoles autorisés dans le webview — tout le reste → shell.openExternal()
 const SAFE_PROTOS = new Set(['http:', 'https:', 'divo:', 'file:', 'chrome:'])
+
+// SEC-009/110 — valide toute <webview> attachée (fenêtre principale et popups "Peek") :
+// src, partition et webPreferences forcés, peu importe ce que la page demande.
+const WEBVIEW_ALLOWED_PROTOS = new Set(['http:', 'https:', 'divo:', 'about:'])
+const WEBVIEW_ALLOWED_PARTITIONS = /^(persist:divo|private:incognito)$/
+function attachWebviewSecurity(webContents) {
+  webContents.on('will-attach-webview', (e, webPreferences, params) => {
+    // Vérifier que l'URL initiale utilise un scheme autorisé (bloque file://, data:, etc.)
+    // Un src vide est autorisé : la webview est d'abord attachée sans src puis naviguée
+    // via will-navigate — c'est le fonctionnement normal du pool d'onglets.
+    if (params.src) {
+      try {
+        if (!WEBVIEW_ALLOWED_PROTOS.has(new URL(params.src).protocol)) { e.preventDefault(); return }
+      } catch { e.preventDefault(); return }
+    }
+
+    // Forcer la partition à une valeur attendue (ignore l'attribut HTML partition="...")
+    if (!WEBVIEW_ALLOWED_PARTITIONS.test(params.partition || '')) {
+      params.partition = 'persist:divo'
+    }
+
+    // Figer toutes les webPreferences (écrase tout attribut webpreferences="...")
+    delete webPreferences.preload
+    delete webPreferences.preloadURL
+    // Preload de confiance : injection anticipée du patch YouTube (avant les scripts de la page)
+    webPreferences.preload = path.join(__dirname, 'renderer', 'page-preload.js')
+    webPreferences.nodeIntegration             = false
+    webPreferences.nodeIntegrationInSubFrames  = false
+    webPreferences.contextIsolation            = true
+    webPreferences.sandbox                     = true
+    webPreferences.webSecurity                 = true
+    webPreferences.allowRunningInsecureContent = false
+    webPreferences.experimentalFeatures        = false
+  })
+}
 
 const WEBVIEW_SHORTCUTS = new Set([
   'ctrl+KeyT', 'ctrl+shift+KeyT', 'ctrl+shift+KeyN', 'ctrl+KeyW',
@@ -1238,36 +1274,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (e) => e.preventDefault())
 
   // SEC-009/110 — valide les webviews attachées (src, partition, webPreferences)
-  const WEBVIEW_ALLOWED_PROTOS = new Set(['http:', 'https:', 'divo:', 'about:'])
-  const WEBVIEW_ALLOWED_PARTITIONS = /^(persist:divo|private:incognito)$/
-  mainWindow.webContents.on('will-attach-webview', (e, webPreferences, params) => {
-    // Vérifier que l'URL initiale utilise un scheme autorisé (bloque file://, data:, etc.)
-    // Un src vide est autorisé : la webview est d'abord attachée sans src puis naviguée
-    // via will-navigate — c'est le fonctionnement normal du pool d'onglets.
-    if (params.src) {
-      try {
-        if (!WEBVIEW_ALLOWED_PROTOS.has(new URL(params.src).protocol)) { e.preventDefault(); return }
-      } catch { e.preventDefault(); return }
-    }
-
-    // Forcer la partition à une valeur attendue (ignore l'attribut HTML partition="...")
-    if (!WEBVIEW_ALLOWED_PARTITIONS.test(params.partition || '')) {
-      params.partition = 'persist:divo'
-    }
-
-    // Figer toutes les webPreferences (écrase tout attribut webpreferences="...")
-    delete webPreferences.preload
-    delete webPreferences.preloadURL
-    // Preload de confiance : injection anticipée du patch YouTube (avant les scripts de la page)
-    webPreferences.preload = path.join(__dirname, 'renderer', 'page-preload.js')
-    webPreferences.nodeIntegration             = false
-    webPreferences.nodeIntegrationInSubFrames  = false
-    webPreferences.contextIsolation            = true
-    webPreferences.sandbox                     = true
-    webPreferences.webSecurity                 = true
-    webPreferences.allowRunningInsecureContent = false
-    webPreferences.experimentalFeatures        = false
-  })
+  attachWebviewSecurity(mainWindow.webContents)
 }
 
 // ── Ouverture de liens externes avec confirmation pour les protocoles inconnus
@@ -1307,6 +1314,57 @@ async function maybeOpenExternal(url, originHostname) {
   }
   shell.openExternal(url).catch(() => {})
 }
+
+// ── Popups JS (window.open avec dimensions, ex : pubs) → mini-fenêtre "Peek" dismissable
+// au lieu d'un nouvel onglet. L'utilisateur choisit de la promouvoir en onglet classique
+// ou de la fermer.
+const PEEK_WIDTH  = 420
+const PEEK_HEIGHT = 640
+function createPeekWindow(url) {
+  const offset = peekWindows.size * 28
+  const win = new BrowserWindow({
+    width: PEEK_WIDTH, height: PEEK_HEIGHT,
+    minWidth: 280, minHeight: 220,
+    frame: false,
+    backgroundColor: '#111113',
+    title: 'Divo — Aperçu',
+    icon: path.join(__dirname, 'assets', 'icon.png'),
+    parent: mainWindow,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-peek.js'),
+      contextIsolation: true,
+      sandbox: true,
+      webviewTag: true,
+    }
+  })
+  if (mainWindow) {
+    const b = mainWindow.getBounds()
+    win.setPosition(
+      Math.round(b.x + (b.width - PEEK_WIDTH) / 2) + offset,
+      Math.round(b.y + (b.height - PEEK_HEIGHT) / 2) + offset
+    )
+  }
+  attachWebviewSecurity(win.webContents)
+  win.loadFile(path.join(__dirname, 'renderer', 'peek.html'), { query: { url } })
+  peekWindows.add(win)
+  win.on('closed', () => peekWindows.delete(win))
+  return win
+}
+
+ipcMain.on('peek-close', e => {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (win && !win.isDestroyed()) win.close()
+})
+
+ipcMain.on('peek-promote', (e, url) => {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (mainWindow && url) {
+    if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false)
+    mainWindow.webContents.send('open-new-tab', url)
+    mainWindow.focus()
+  }
+  if (win && !win.isDestroyed()) win.close()
+})
 
 app.whenReady().then(async () => {
   setupHttpsUpgrade()
@@ -1487,7 +1545,7 @@ app.whenReady().then(async () => {
           }
         } catch {}
       })
-      contents.setWindowOpenHandler(({ url }) => {
+      contents.setWindowOpenHandler(({ url, disposition }) => {
         try {
           const proto = new URL(url).protocol
           if (!SAFE_PROTOS.has(proto) && !proto.startsWith('chrome-extension')) {
@@ -1496,6 +1554,14 @@ app.whenReady().then(async () => {
             return { action: 'deny' }
           }
         } catch {}
+        // Toute demande d'ouverture d'un nouvel onglet/fenêtre (lien target=_blank,
+        // window.open avec ou sans dimensions, pub qui s'ouvre "dans un autre onglet"...)
+        // passe d'abord par une mini-fenêtre "Peek" façon Arc : l'utilisateur choisit
+        // de la promouvoir en onglet classique ou de la fermer.
+        if (disposition === 'new-window' || disposition === 'foreground-tab' || disposition === 'background-tab') {
+          createPeekWindow(url)
+          return { action: 'deny' }
+        }
         if (mainWindow && url) {
           if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false)
           mainWindow.webContents.send('open-new-tab', url)
