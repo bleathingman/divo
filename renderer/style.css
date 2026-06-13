@@ -367,13 +367,6 @@ body.private-active .nav-row .nav-btn:hover:not(:disabled) {
   cursor: default
 }
 
-/* ── Icônes/popups des extensions (uBlock Origin…) ── */
-.ext-actions {
-  --browser-action-hover-bg: #2c2c2e;
-  flex-shrink: 0;
-  margin-left: 2px;
-}
-
 .url-bar {
   flex: 1;
   min-width: 0;
@@ -2019,7 +2012,6 @@ body.light .ctx-color-swatch.active { border-color: #1c1c1e; box-shadow: 0 0 0 1
 body.layout-top .top-nav-bar { display: flex }
 .top-nav-bar .nav-btn { -webkit-app-region: no-drag; color: #858585 }
 .top-nav-bar .nav-btn:hover:not([disabled]) { background: rgba(255,255,255,.07); color: #cccccc }
-.top-nav-bar .ext-actions { -webkit-app-region: no-drag; --browser-action-hover-bg: rgba(255,255,255,.07) }
 
 .top-url-bar {
   flex: 1 !important;
@@ -2178,8 +2170,6 @@ body.light .space-add-btn:hover { border-color: #8e8e93; color: #3a3a3c }
 
 body.light .nav-btn { color: #8e8e93 }
 body.light .nav-btn:hover:not([disabled]) { background: #e5e5ea; color: #1c1c1e }
-body.light .ext-actions { --browser-action-hover-bg: #e5e5ea }
-body.light.layout-top .ext-actions { --browser-action-hover-bg: rgba(0,0,0,.06) }
 
 body.light .url-bar { background: #e5e5ea; color: #1c1c1e; border-color: transparent }
 body.light .url-bar:focus { background: #fff; border-color: rgba(10,132,255,.45) }

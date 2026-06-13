@@ -1,10 +1,7 @@
 const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dialog } = require('electron')
 const path = require('path')
 const fs   = require('fs')
-const { spawn } = require('child_process')
 const crypto = require('crypto')
-const { installChromeWebStore, installExtension, uninstallExtension } = require('electron-chrome-web-store')
-const { ElectronChromeExtensions } = require('electron-chrome-extensions')
 
 // ── Crash logging
 const LOG_PATH = path.join(app.getPath('userData'), 'crash.log')
@@ -29,11 +26,6 @@ let mainWindow
 const downloadItems = new Map()
 const pendingPerms  = new Map()
 const peekWindows   = new Set()
-
-// ── Cadre d'extensions Chrome (chrome.tabs/windows/browserAction/contextMenus...)
-let chromeExtensions = null
-const pendingTabCreations = new Map()
-let nextCreateTabRequestId = 1
 
 // Protocoles autorisés dans le webview — tout le reste → shell.openExternal()
 const SAFE_PROTOS = new Set(['http:', 'https:', 'divo:', 'file:', 'chrome:'])
@@ -96,7 +88,7 @@ function profileDir(id) { return path.join(PROFILES_DIR, id || activeProfileId) 
 function saveProfilesIndex() { try { fs.writeFileSync(PROFILES_INDEX, JSON.stringify(profilesIndex)) } catch {} }
 
 // ── Config persistante (par profil)
-let config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
+let config = { webDarkMode: false, httpsUpgrade: true }
 function saveConfig() {
   try { fs.writeFileSync(path.join(profileDir(), 'config.json'), JSON.stringify(config)) } catch (e) { console.error('saveConfig error', e) }
 }
@@ -181,7 +173,7 @@ function writeHistory(h) { try { fs.writeFileSync(historyPath, JSON.stringify(h)
 function loadProfileData(id) {
   activeProfileId = id
   try { fs.mkdirSync(profileDir(id), { recursive: true }) } catch {}
-  config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
+  config = { webDarkMode: false, httpsUpgrade: true }
   try { Object.assign(config, JSON.parse(fs.readFileSync(path.join(profileDir(id), 'config.json'), 'utf-8'))) } catch {}
   // {} (et non null) — pour qu'un profil neuf utilise ses propres défauts
   // au lieu de retomber sur le localStorage partagé (qui contient le profil précédent)
@@ -366,437 +358,6 @@ function getProtectedSessions() {
   return [session.defaultSession, ...PROTECTED_PARTITIONS.map(p => session.fromPartition(p))]
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ── Extensions utilisateur (Chrome Web Store)
-// ═══════════════════════════════════════════════════════════════
-const USER_EXT_DIR = path.join(app.getPath('userData'), 'user-extensions')
-fs.mkdirSync(USER_EXT_DIR, { recursive: true })
-
-// Trouve le bon répertoire d'une extension (root ou sous-dossier versionné type "1.2.3_0")
-function findExtDir(baseDir) {
-  if (fs.existsSync(path.join(baseDir, 'manifest.json'))) return baseDir
-  try {
-    const sub = fs.readdirSync(baseDir).find(d => /^\d/.test(d) && fs.existsSync(path.join(baseDir, d, 'manifest.json')))
-    if (sub) return path.join(baseDir, sub)
-  } catch {}
-  return baseDir
-}
-
-// Lit le manifest.json d'un répertoire d'extension (supporte les sous-dossiers versionnés)
-function readExtManifest(dir) {
-  const actualDir = findExtDir(dir)
-  try { return JSON.parse(fs.readFileSync(path.join(actualDir, 'manifest.json'), 'utf-8')) } catch { return null }
-}
-
-// Résout les noms localisés __MSG_xxx__ depuis _locales/
-function resolveMsg(value, extDir) {
-  if (!value || !value.startsWith('__MSG_')) return value
-  const key = value.replace(/^__MSG_/, '').replace(/__$/, '')
-  try {
-    const manifest = readExtManifest(extDir)
-    const locale = manifest?.default_locale || 'en'
-    const actualDir = findExtDir(extDir)
-    const msgs = JSON.parse(fs.readFileSync(path.join(actualDir, '_locales', locale, 'messages.json'), 'utf-8'))
-    return msgs[key]?.message || msgs[key.toLowerCase()]?.message || value
-  } catch { return value }
-}
-
-// ── Setup Chrome Web Store (electron-chrome-web-store)
-// Note: le preload de la lib ne fonctionne pas dans les webview Electron (guest process).
-// On utilise la lib uniquement pour le téléchargement/installation CRX (MV3 natif).
-async function setupChromeWebStore() {
-  // Polyfill injecté dans tous les service workers d'extensions (chrome.storage.sync, session, scripting)
-  const swPolyfillPath = path.join(__dirname, 'ext-sw-polyfill.js')
-  for (const s of getProtectedSessions()) {
-    try { s.registerPreloadScript({ id: `divo-sw-${s.partition||'d'}`, type: 'service-worker', filePath: swPolyfillPath }) } catch (e) { console.warn('[ext] registerPreloadScript SW:', e.message) }
-    // 'frame' retiré : injectait le polyfill dans les sandboxed iframes (ex: YouTube),
-    // causant "Blocked script execution in about:blank because sandboxed"
-  }
-
-  try {
-    await installChromeWebStore({
-      session: session.fromPartition('persist:divo'),
-      extensionsPath: USER_EXT_DIR,
-      loadExtensions: false,
-      autoUpdate: false,
-      beforeInstall: async () => ({ action: 'allow' }),
-    })
-  } catch (e) { console.warn('[cws] installChromeWebStore:', e.message) }
-}
-
-// Injection CWS dans les webviews — déclenche l'install via page-title-updated
-const CWS_INJECT_JS = `(function(){
-  if (window.__dvCws) return; window.__dvCws = 1;
-  function getExtId() {
-    const m = location.pathname.match(/\\/detail\\/[^/]+\\/([a-z]{32})/);
-    return m ? m[1] : null;
-  }
-  function injectBtn() {
-    const extId = getExtId(); if (!extId) return;
-    if (document.getElementById('__divo_add')) return;
-    const addBtn = Array.from(document.querySelectorAll('button,[role="button"]')).find(el =>
-      /add to chrome|ajouter|hinzufügen|añadir|aggiungi/i.test((el.textContent + ' ' + (el.getAttribute('aria-label')||'')).trim())
-    );
-    const btn = document.createElement('button');
-    btn.id = '__divo_add';
-    btn.textContent = 'Add to Divo';
-    btn.style.cssText = 'background:#0a84ff;color:#fff;border:none;border-radius:20px;padding:8px 22px;font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;margin:4px 0 4px 8px;';
-    btn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); document.title='divo-action:install-extension:'+extId; }, true);
-    if (addBtn) {
-      addBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopImmediatePropagation(); document.title='divo-action:install-extension:'+extId; }, true);
-      addBtn.textContent = addBtn.textContent.replace(/add to chrome/gi,'Add to Divo').replace(/ajouter à chrome/gi,'Ajouter à Divo').replace(/ajouter/gi,'Ajouter à Divo');
-      addBtn.parentNode?.insertBefore(btn, addBtn.nextSibling);
-    } else {
-      btn.style.cssText += 'position:fixed;top:64px;right:16px;z-index:2147483647;box-shadow:0 2px 12px rgba(0,0,0,.35);';
-      document.body.appendChild(btn);
-    }
-  }
-  injectBtn();
-  new MutationObserver(injectBtn).observe(document.body, { childList:true, subtree:true });
-})()`
-
-// LEGACY — kept for reference
-function crxToZip(buffer) {
-  if (buffer.toString('ascii', 0, 4) !== 'Cr24') {
-    // Déjà un ZIP ?
-    if (buffer[0] === 0x50 && buffer[1] === 0x4B) return buffer
-    throw new Error('Format CRX invalide')
-  }
-  const ver = buffer.readUInt32LE(4)
-  if (ver === 2) {
-    const pubLen = buffer.readUInt32LE(8), sigLen = buffer.readUInt32LE(12)
-    return buffer.subarray(16 + pubLen + sigLen)
-  }
-  if (ver === 3) {
-    const hdrLen = buffer.readUInt32LE(8)
-    return buffer.subarray(12 + hdrLen)
-  }
-  throw new Error('Version CRX non supportée : ' + ver)
-}
-
-// Extrait un ZIP dans destDir (PowerShell sur Windows, unzip sur Linux)
-function extractZip(zipPath, destDir) {
-  return new Promise((resolve, reject) => {
-    fs.mkdirSync(destDir, { recursive: true })
-    let proc
-    if (process.platform === 'win32') {
-      const cmd = `Expand-Archive -Force -Path '${zipPath.replace(/'/g,"''")}' -DestinationPath '${destDir.replace(/'/g,"''")}'`
-      proc = spawn('powershell.exe', ['-NonInteractive', '-Command', cmd], { stdio: 'ignore' })
-    } else {
-      proc = spawn('unzip', ['-o', '-q', zipPath, '-d', destDir], { stdio: 'ignore' })
-    }
-    proc.on('close', c => c === 0 ? resolve() : reject(new Error('Extraction ZIP échouée: ' + c)))
-    proc.on('error', reject)
-  })
-}
-
-// Télécharge un CRX via Node.js https natif (évite les intercepteurs Electron)
-function downloadCrx(startUrl) {
-  return new Promise((resolve, reject) => {
-    const https = require('https')
-    const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
-    function doGet(u, hops) {
-      if (hops > 8) { reject(new Error('Trop de redirections')); return }
-      try { new URL(u) } catch { reject(new Error('URL invalide')); return }
-      https.get(u, { headers: { 'User-Agent': UA, 'Accept': '*/*' } }, res => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume(); doGet(new URL(res.headers.location, u).href, hops + 1); return
-        }
-        if (res.statusCode !== 200) { res.resume(); reject(new Error('HTTP ' + res.statusCode)); return }
-        const chunks = []
-        res.on('data', c => chunks.push(c))
-        res.on('end', () => resolve(Buffer.concat(chunks)))
-        res.on('error', reject)
-      }).on('error', reject)
-    }
-    doGet(startUrl, 0)
-  })
-}
-
-// Shim injecté en inline dans la background page HTML (avant le SW script)
-const MV3_SHIM_JS = `
-/* Divo MV3→MV2 shim */
-(function(){
-  if(typeof chrome==='undefined') return;
-
-  // chrome.action ↔ chrome.browserAction
-  if(chrome.action && !chrome.browserAction) chrome.browserAction=chrome.action;
-  if(chrome.browserAction && !chrome.action)  chrome.action=chrome.browserAction;
-
-  // chrome.scripting polyfill
-  if(!chrome.scripting) chrome.scripting={
-    executeScript:function({target,func,files,args}){
-      const id=target&&target.tabId;
-      if(func){const code='('+func.toString()+')('+(args||[]).map(JSON.stringify).join(',')+')';return new Promise((rs,rj)=>chrome.tabs.executeScript(id,{code},r=>chrome.runtime.lastError?rj(chrome.runtime.lastError):rs([{result:r&&r[0]}])));}
-      if(files)return Promise.all(files.map(f=>new Promise((rs)=>chrome.tabs.executeScript(id,{file:f},()=>rs()))));
-      return Promise.resolve([]);
-    },
-    insertCSS:function({target,css,files}){
-      const id=target&&target.tabId;
-      if(css)return new Promise(rs=>chrome.tabs.insertCSS(id,{code:css},()=>rs()));
-      if(files)return Promise.all(files.map(f=>new Promise(rs=>chrome.tabs.insertCSS(id,{file:f},()=>rs()))));
-      return Promise.resolve();
-    },
-    removeCSS:function(){return Promise.resolve();}
-  };
-
-  // chrome.storage.session (volatile in-memory)
-  if(chrome.storage && !chrome.storage.session){
-    const m=Object.create(null),ls=[];
-    chrome.storage.session={
-      get:function(k,cb){let r;if(!k)r=Object.assign({},m);else if(typeof k==='string')r={[k]:m[k]};else if(Array.isArray(k))r=k.reduce((o,x)=>(o[x]=m[x],o),{});else r=Object.keys(k).reduce((o,x)=>(o[x]=m[x]!==undefined?m[x]:k[x],o),{});if(cb)cb(r);return Promise.resolve(r);},
-      set:function(v,cb){const ch={};Object.keys(v).forEach(x=>{ch[x]={oldValue:m[x],newValue:v[x]};m[x]=v[x]});ls.forEach(f=>f(ch,'session'));if(cb)cb();return Promise.resolve();},
-      remove:function(k,cb){(Array.isArray(k)?k:[k]).forEach(x=>delete m[x]);if(cb)cb();return Promise.resolve();},
-      clear:function(cb){Object.keys(m).forEach(x=>delete m[x]);if(cb)cb();return Promise.resolve();},
-      onChanged:{addListener:f=>ls.push(f),removeListener:f=>{const i=ls.indexOf(f);if(i>-1)ls.splice(i,1)},hasListener:f=>ls.includes(f)}
-    };
-  }
-
-  // chrome.storage.sync → chrome.storage.local si absent
-  if(chrome.storage && !chrome.storage.sync) chrome.storage.sync=chrome.storage.local;
-
-  // Service worker globals
-  if(typeof clients==='undefined') window.clients={matchAll:()=>Promise.resolve([]),claim:()=>Promise.resolve(),openWindow:url=>{try{window.open(url)}catch(e){}return Promise.resolve(null)}};
-  if(typeof skipWaiting==='undefined') window.skipWaiting=()=>Promise.resolve();
-  if(typeof caches==='undefined') window.caches={open:()=>Promise.resolve({put:()=>Promise.resolve(),match:()=>Promise.resolve(undefined),delete:()=>Promise.resolve(false),keys:()=>Promise.resolve([])}),match:()=>Promise.resolve(undefined),has:()=>Promise.resolve(false),delete:()=>Promise.resolve(false),keys:()=>Promise.resolve([])};
-
-  // Masquer les events cycle-de-vie SW (install/activate/fetch) — sans sens dans une page
-  const _ael=EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener=function(t,...a){if(this===window&&(t==='install'||t==='activate'||t==='fetch'))return;return _ael.call(this,t,...a);};
-})();
-`
-
-// Convertit un manifest MV3 en MV2 compatible Electron via background page HTML
-function patchMv3ToMv2(dir, manifest) {
-  const swFile = manifest.background.service_worker
-
-  // Détecter si le SW utilise des ES modules (import/export au niveau top-level)
-  let useModule = false
-  try {
-    const swSrc = fs.readFileSync(path.join(dir, swFile), 'utf-8')
-    useModule = /^\s*(import\s|export\s)/m.test(swSrc)
-  } catch {}
-
-  // Background page HTML — charge le shim puis le SW (module ou script classique)
-  const scriptTag = useModule
-    ? `<script type="module">\n${MV3_SHIM_JS}\nimport './${swFile}';\n</script>`
-    : `<script>${MV3_SHIM_JS}</script>\n  <script src="${swFile}"></script>`
-
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>\n  ${scriptTag}\n</body></html>`
-  fs.writeFileSync(path.join(dir, '__divo_bg.html'), html)
-
-  // Patch manifest.json : MV3 → MV2
-  const patched = Object.assign({}, manifest)
-  patched.manifest_version = 2
-  patched.background = { page: '__divo_bg.html', persistent: true }
-
-  // host_permissions → permissions
-  if (manifest.host_permissions?.length)
-    patched.permissions = [...new Set([...(manifest.permissions || []), ...manifest.host_permissions])]
-  delete patched.host_permissions
-
-  // chrome.action → browser_action
-  if (manifest.action && !manifest.browser_action) {
-    patched.browser_action = manifest.action
-    delete patched.action
-  }
-
-  // content_security_policy : objet MV3 → string MV2
-  if (manifest.content_security_policy && typeof manifest.content_security_policy === 'object')
-    patched.content_security_policy = manifest.content_security_policy.extension_pages || "script-src 'self'; object-src 'self'"
-
-  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(patched, null, 2))
-}
-
-// uBlock Origin (CWS) — installé automatiquement comme moteur de blocage principal,
-// en complément du filtrage maison (CSS/cosmétique + scripts YouTube/Twitch).
-const UBLOCK_ORIGIN_ID = 'cjpalhdlnbpafiamejdnhcphjbkeiagm'
-
-// uBlock Origin ne tourne que sur persist:divo : c'est là que chrome.webRequest
-// bloque le réseau et que le preload electron-chrome-extensions (chrome.browserAction,
-// contextMenus, privacy, webNavigation...) est enregistré. Les autres extensions
-// restent chargées sur toutes les sessions protégées comme avant.
-function extensionSessions(extId) {
-  return extId === UBLOCK_ORIGIN_ID ? [session.fromPartition('persist:divo')] : getProtectedSessions()
-}
-
-// Installe une extension via electron-chrome-web-store
-async function installExtensionById(extId) {
-  const ext = await installExtension(extId, {
-    session: session.fromPartition('persist:divo'),
-    extensionsPath: USER_EXT_DIR,
-  })
-  const dir = findExtDir(path.join(USER_EXT_DIR, extId))
-  for (const s of extensionSessions(extId)) {
-    try { await s.extensions.loadExtension(dir, { allowFileAccess: false }) } catch {}
-  }
-  if (!config.userExtensions) config.userExtensions = []
-  config.userExtensions = config.userExtensions.filter(e => e.id !== extId)
-  config.userExtensions.push({ id: extId, enabled: true })
-  saveConfig()
-  mainWindow?.webContents.send('extension-installed', { id: extId, name: ext.name })
-  return { id: extId, name: ext.name, version: ext.manifest?.version }
-}
-
-async function maybeAutoInstallUblock() {
-  if (!config.adblock) return
-  if (config.ublockOrigin === false) return
-  if ((config.userExtensions || []).some(e => e.id === UBLOCK_ORIGIN_ID)) return
-  try {
-    await installExtensionById(UBLOCK_ORIGIN_ID)
-    console.log('[ublock] uBlock Origin installé automatiquement')
-  } catch (e) {
-    console.warn('[ublock] auto-install échoué:', e.message)
-  }
-}
-
-// Charge toutes les extensions activées au démarrage
-async function loadUserExtensions() {
-  const exts = config.userExtensions || []
-  for (const ext of exts) {
-    if (!ext.enabled) continue
-    const baseDir = path.join(USER_EXT_DIR, ext.id)
-    const dir = findExtDir(baseDir)
-    if (!fs.existsSync(path.join(dir, 'manifest.json'))) continue
-    for (const s of extensionSessions(ext.id)) {
-      try { await s.extensions.loadExtension(dir, { allowFileAccess: false }) } catch {}
-    }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ── Cadre chrome.tabs/windows/browserAction/contextMenus pour persist:divo
-// ═══════════════════════════════════════════════════════════════
-// Fournit les API chrome.* manquantes du support natif d'Electron (browserAction,
-// contextMenus, privacy, webNavigation...), nécessaires au fonctionnement de
-// uBlock Origin et affiche son icône/popup via <browser-action-list>.
-function setupExtensionsFramework() {
-  const extSession = session.fromPartition('persist:divo')
-  ElectronChromeExtensions.handleCRXProtocol(session.defaultSession)
-  chromeExtensions = new ElectronChromeExtensions({
-    license: 'GPL-3.0',
-    session: extSession,
-    createTab(details) {
-      return new Promise((resolve, reject) => {
-        if (!mainWindow) { reject(new Error('Aucune fenêtre disponible')); return }
-        const requestId = nextCreateTabRequestId++
-        const timer = setTimeout(() => {
-          if (pendingTabCreations.delete(requestId)) reject(new Error('Timeout création onglet'))
-        }, 5000)
-        pendingTabCreations.set(requestId, { resolve, reject, timer })
-        mainWindow.webContents.send('ext-create-tab', {
-          requestId, url: details.url || null, active: details.active !== false,
-        })
-      })
-    },
-    selectTab(tab) {
-      try { mainWindow?.webContents.send('ext-select-tab', tab.id) } catch {}
-    },
-    removeTab(tab) {
-      // tab.contents peut déjà être détruit à ce stade (fermeture d'onglet) —
-      // accéder à tab.id lève alors "Object has been destroyed", qui crashait
-      // tout le process principal via uncaughtException.
-      try { mainWindow?.webContents.send('ext-remove-tab', tab.id) } catch {}
-    },
-    async createWindow() {
-      // Divo est mono-fenêtre : chrome.windows.create ouvre un nouvel onglet
-      // dans la fenêtre existante plutôt qu'une fenêtre OS séparée.
-      return mainWindow
-    },
-    removeWindow() {},
-  })
-}
-
-ipcMain.on('ext-tab-activated', (_, webContentsId) => {
-  if (!chromeExtensions) return
-  try {
-    const wc = webContents.fromId(webContentsId)
-    if (wc && !wc.isDestroyed()) chromeExtensions.selectTab(wc)
-  } catch {}
-})
-
-ipcMain.on('ext-create-tab-result', (_, { requestId, webContentsId }) => {
-  const pending = pendingTabCreations.get(requestId)
-  if (!pending) return
-  pendingTabCreations.delete(requestId)
-  clearTimeout(pending.timer)
-  try {
-    const wc = webContents.fromId(webContentsId)
-    if (wc && !wc.isDestroyed()) pending.resolve([wc, mainWindow])
-    else pending.reject(new Error('webContents introuvable'))
-  } catch (e) { pending.reject(e) }
-})
-
-// ── IPC extensions
-ipcMain.handle('get-user-extensions', () => {
-  return (config.userExtensions || []).map(e => {
-    const baseDir = path.join(USER_EXT_DIR, e.id)
-    const manifest = readExtManifest(baseDir) || {}
-    const icons = manifest.icons || {}
-    const iconFile = icons['48'] || icons['128'] || icons['64'] || icons['32'] || icons['16'] || null
-    const rawName = manifest.name || e.id
-    const rawDesc = manifest.description || ''
-    return {
-      id:          e.id,
-      enabled:     e.enabled,
-      name:        resolveMsg(rawName, baseDir) || e.id,
-      version:     manifest.version || '?',
-      description: resolveMsg(rawDesc, baseDir),
-      iconPath:    iconFile || null,
-    }
-  })
-})
-
-ipcMain.handle('install-extension-by-id', async (_, extId) => {
-  if (!/^[a-z]{32}$/.test(extId)) return { ok: false, reason: 'ID invalide' }
-  try {
-    const info = await installExtensionById(extId)
-    return { ok: true, ...info }
-  } catch (e) {
-    console.error('[ext] install error', e)
-    return { ok: false, reason: e.message }
-  }
-})
-
-ipcMain.handle('remove-user-extension', async (_, extId) => {
-  // Retirer des sessions chargées
-  for (const s of getProtectedSessions()) {
-    try {
-      const loaded = s.extensions.getAllExtensions()
-      const ext = loaded.find(e => e.id === extId)
-      if (ext) s.extensions.removeExtension(extId)
-    } catch {}
-  }
-  // Supprimer le répertoire
-  try { fs.rmSync(path.join(USER_EXT_DIR, extId), { recursive: true, force: true }) } catch {}
-  // Retirer de la config
-  config.userExtensions = (config.userExtensions || []).filter(e => e.id !== extId)
-  // Empêche la réinstallation automatique au prochain démarrage
-  if (extId === UBLOCK_ORIGIN_ID) config.ublockOrigin = false
-  saveConfig()
-  return { ok: true }
-})
-
-ipcMain.handle('toggle-user-extension', async (_, extId, enabled) => {
-  const ext = (config.userExtensions || []).find(e => e.id === extId)
-  if (!ext) return { ok: false }
-  ext.enabled = enabled
-  saveConfig()
-  const dir = path.join(USER_EXT_DIR, extId)
-  for (const s of getProtectedSessions()) {
-    try {
-      if (enabled) {
-        await s.extensions.loadExtension(dir, { allowFileAccess: false })
-      } else {
-        s.extensions.removeExtension(extId)
-      }
-    } catch {}
-  }
-  return { ok: true }
-})
-
-// CWS injection supprimée — gérée nativement par electron-chrome-web-store
-
 // ── Handlers nommés (appliqués sur chaque session)
 const CSP_INTERNAL =
   "default-src 'none'; " +
@@ -815,11 +376,6 @@ function cspHandler(details, callback) {
 }
 
 function httpsUpgradeHandler(details, callback) {
-  // Ne jamais bloquer ni upgrader les requêtes d'extensions
-  if (details.url.startsWith('chrome-extension://') ||
-      (details.initiator && details.initiator.startsWith('chrome-extension://'))) {
-    callback({}); return
-  }
   // HTTPS upgrade — mainFrame uniquement, ignore les adresses locales
   if (config.httpsUpgrade !== false && details.url.startsWith('http://') && details.resourceType === 'mainFrame') {
     try {
@@ -857,12 +413,7 @@ function setupCsp() {
 }
 
 function setupHttpsUpgrade() {
-  // uBlock Origin est le moteur de blocage réseau principal sur persist:divo
-  // (chrome.webRequest côté extension) — enregistrer aussi un handler webRequest
-  // applicatif sur cette session empêcherait les listeners de l'extension de se
-  // déclencher (limitation documentée d'Electron : un seul handler par session/event).
   for (const s of getProtectedSessions()) {
-    if (s === session.fromPartition('persist:divo')) continue
     s.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, httpsUpgradeHandler)
   }
 }
@@ -1196,7 +747,7 @@ function createWindow() {
   })
 
   // Enregistrer divo:// pour toutes les sessions AVANT le chargement de la page
-  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html', extensions: 'extensions.html', secret: 'secret.html' }
+  const DIVO_PAGES = { newtab: 'newtab.html', settings: 'settings.html', dino: 'dino.html', secret: 'secret.html' }
   const DIVO_MIME  = { '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
                        '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
                        '.woff': 'font/woff', '.woff2': 'font/woff2' }
@@ -1213,21 +764,6 @@ function createWindow() {
         const mime = DIVO_MIME[path.extname(rel).toLowerCase()]
         if (!mime || !fs.existsSync(filePath)) return new Response('Not found', { status: 404 })
         return new Response(fs.readFileSync(filePath), { headers: { 'Content-Type': mime } })
-      }
-      if (hostname === 'ext-icon') {
-        const iconRel  = pathname.replace(/^\/+/, '')
-        const parts    = iconRel.split('/')
-        const extId    = parts.shift()
-        const iconPath = parts.join('/')
-        if (/^[a-z]{32}$/.test(extId) && iconPath) {
-          const extDir = findExtDir(path.join(USER_EXT_DIR, extId))
-          const iconFile = path.join(extDir, iconPath)
-          if (fs.existsSync(iconFile)) {
-            const mime = DIVO_MIME[path.extname(iconPath).toLowerCase()] || 'image/png'
-            return new Response(fs.readFileSync(iconFile), { headers: { 'Content-Type': mime } })
-          }
-        }
-        return new Response('Not found', { status: 404 })
       }
       const file = DIVO_PAGES[hostname]
       if (file) {
@@ -1369,8 +905,6 @@ ipcMain.on('peek-promote', (e, url) => {
 app.whenReady().then(async () => {
   setupHttpsUpgrade()
   setupCsp()
-  setupExtensionsFramework()
-  await setupChromeWebStore()
 
   // ── Téléchargements — appliqués sur toutes les sessions (persist:divo + private:incognito)
   const safeFilename = raw =>
@@ -1438,48 +972,13 @@ app.whenReady().then(async () => {
     })
   }
 
-  // ── Polyfill extensions : chrome.storage.sync → chrome.storage.local (non supporté dans Electron)
-  const EXT_STORAGE_POLYFILL = `(function(){
-    try {
-      if (typeof chrome === 'undefined' || !chrome.storage) return;
-      if (!chrome.storage.sync) {
-        Object.defineProperty(chrome.storage, 'sync', { get: () => chrome.storage.local, configurable: true });
-      }
-      if (!chrome.storage.managed) {
-        const noop = { get: (k,cb) => { if(cb) cb({}); return Promise.resolve({}) },
-                       set: (v,cb) => { if(cb) cb(); return Promise.resolve() },
-                       remove: (k,cb) => { if(cb) cb(); return Promise.resolve() },
-                       clear: (cb) => { if(cb) cb(); return Promise.resolve() },
-                       onChanged: { addListener:()=>{}, removeListener:()=>{}, hasListener:()=>false } };
-        Object.defineProperty(chrome.storage, 'managed', { get: () => noop, configurable: true });
-      }
-    } catch {}
-  })()`
-
   app.on('web-contents-created', (_, contents) => {
-    // Injecter le polyfill chrome.storage dans les background pages d'extensions
-    if (contents.getType() === 'backgroundPage') {
-      contents.on('dom-ready', () => {
-        if (!contents.isDestroyed()) contents.executeJavaScript(EXT_STORAGE_POLYFILL).catch(() => {})
-      })
-    }
-
     if (contents.getType() === 'webview') {
-      // Enregistrer l'onglet auprès de chrome.tabs/windows (uBlock Origin et autres
-      // extensions) — uniquement sur persist:divo, seule session équipée du cadre
-      // electron-chrome-extensions.
-      if (chromeExtensions && contents.session === session.fromPartition('persist:divo')) {
-        try { chromeExtensions.addTab(contents, mainWindow) } catch (e) { console.error('[ext] addTab failed:', e) }
-        contents.once('destroyed', () => {
-          try { chromeExtensions.removeTab(contents) } catch {}
-        })
-      }
-
       // Liens custom protocol (steam://, discord://, epic://, etc.) → ouvrir dans l'OS
       contents.on('will-navigate', (event, url) => {
         try {
           const proto = new URL(url).protocol
-          if (!SAFE_PROTOS.has(proto) && !proto.startsWith('chrome-extension')) {
+          if (!SAFE_PROTOS.has(proto)) {
             event.preventDefault()
             const origin = (() => { try { return new URL(contents.getURL()).hostname } catch { return '' } })()
             maybeOpenExternal(url, origin)
@@ -1515,11 +1014,7 @@ app.whenReady().then(async () => {
           }, true);
         })()`).catch(() => {})
 
-        if (url.includes('chromewebstore.google.com/detail/')) {
-          if (!contents.isDestroyed()) contents.executeJavaScript(CWS_INJECT_JS).catch(() => {})
-        }
-
-        if (config.webDarkMode && !url.startsWith('divo:') && !url.startsWith('chrome-extension:')) {
+        if (config.webDarkMode && !url.startsWith('divo:')) {
           try {
             const hostname = new URL(url).hostname.replace(/^www\./, '')
             const skip = WEB_DARK_SKIP.some(h => hostname === h || hostname.endsWith('.' + h))
@@ -1528,13 +1023,10 @@ app.whenReady().then(async () => {
         }
       })
 
-      // Navigation SPA : re-injecter CWS + dark mode
+      // Navigation SPA : re-injecter dark mode
       contents.on('did-navigate-in-page', (_, url, isMainFrame) => {
         if (!isMainFrame || !url || url.startsWith('divo:')) return
-        if (url.includes('chromewebstore.google.com/detail/')) {
-          if (!contents.isDestroyed()) contents.executeJavaScript('window.__dvCws=0;' + CWS_INJECT_JS).catch(() => {})
-        }
-        if (!config.webDarkMode || url.startsWith('chrome-extension:')) return
+        if (!config.webDarkMode) return
         try {
           const hostname = new URL(url).hostname.replace(/^www\./, '')
           const skip = WEB_DARK_SKIP.some(h => hostname === h || hostname.endsWith('.' + h))
@@ -1548,7 +1040,7 @@ app.whenReady().then(async () => {
       contents.setWindowOpenHandler(({ url, disposition }) => {
         try {
           const proto = new URL(url).protocol
-          if (!SAFE_PROTOS.has(proto) && !proto.startsWith('chrome-extension')) {
+          if (!SAFE_PROTOS.has(proto)) {
             const origin = (() => { try { return new URL(contents.getURL()).hostname } catch { return '' } })()
             maybeOpenExternal(url, origin)
             return { action: 'deny' }
@@ -1587,10 +1079,6 @@ app.whenReady().then(async () => {
   }
 
   createWindow()
-
-  // ── Extensions utilisateur (après chargement du profil, pour persister la config au bon endroit)
-  await loadUserExtensions()
-  maybeAutoInstallUblock().catch(e => console.warn('[ublock]', e.message))
 
   // ── macOS : menu système (indispensable pour Cmd+C/V/Z/A dans les champs texte)
   if (process.platform === 'darwin') {
@@ -1660,14 +1148,6 @@ ipcMain.on('answer-permission',  (_, key, granted) => {
   if (cb) { cb(granted); pendingPerms.delete(key) }
 })
 
-// ── Adblock IPC
-ipcMain.handle('adblock-status', () => config.adblock)
-ipcMain.handle('adblock-toggle', (_, enabled) => {
-  config.adblock = !!enabled
-  saveConfig()
-  if (config.adblock) maybeAutoInstallUblock().catch(e => console.warn('[ublock]', e.message))
-  return config.adblock
-})
 ipcMain.handle('is-default-browser', () => app.isDefaultProtocolClient('https') || app.isDefaultProtocolClient('http'))
 ipcMain.handle('set-default-browser', async () => {
   const { response } = await dialog.showMessageBox(mainWindow, {

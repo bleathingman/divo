@@ -32,9 +32,6 @@ document.getElementById('btn-bitwarden').addEventListener('click', () => {
   window.location.href = 'https://vault.bitwarden.com/#/login'
 })
 
-document.getElementById('btn-extensions').addEventListener('click', () => {
-  window.location.href = 'divo://extensions'
-})
 document.getElementById('btn-settings').addEventListener('click', () => {
   window.location.href = 'divo://settings'
 })

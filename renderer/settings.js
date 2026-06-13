@@ -13,9 +13,6 @@ document.getElementById('search-engine').addEventListener('change', syncSettings
 document.getElementById('homepage').addEventListener('change', syncSettings)
 document.getElementById('save-session').addEventListener('change', syncSettings)
 document.getElementById('auto-archive').addEventListener('change', syncSettings)
-document.getElementById('adblock-toggle').addEventListener('change', function() {
-  document.title = 'divo-action:adblock:' + this.checked
-})
 const themeSelect = document.getElementById('theme-select')
 themeSelect.value = document.documentElement.getAttribute('data-theme') || 'dark'
 themeSelect.addEventListener('change', function() {
@@ -40,9 +37,6 @@ document.getElementById('https-upgrade-toggle').addEventListener('change', funct
 })
 document.getElementById('default-browser-btn').addEventListener('click', function() {
   document.title = 'divo-settings-action:set-default-browser'
-})
-document.getElementById('btn-open-extensions').addEventListener('click', function() {
-  document.title = 'divo-settings-action:open-extensions'
 })
 document.getElementById('update-action-btn').addEventListener('click', function() {
   if (this.dataset.state === 'available') {

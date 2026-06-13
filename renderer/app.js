@@ -199,14 +199,6 @@ function wv() {
   return (key && pageWebviews.get(key)) || webview
 }
 
-// Informe le cadre d'extensions (chrome.tabs/windows) de l'onglet actif —
-// nécessaire pour que le badge/popup d'uBlock Origin reflète le bon onglet.
-function notifyExtTabActivated() {
-  const el = wv()
-  if (!el || el.getAttribute('partition') !== 'persist:divo' || !el.__ready) return
-  try { window.bridge.extTabActivated(el.getWebContentsId()) } catch {}
-}
-
 // ── Virtual list — rend uniquement les items visibles
 const ITEM_H = 30
 
@@ -316,13 +308,12 @@ function stripSlash(u) { return (u || '').replace(/\/+$/, '') }
 // Comparaison stricte sur le protocole divo: — les includes() sur .html étaient bypassables
 // par n'importe quelle page externe hébergée à une URL contenant "newtab.html" etc.
 function isSpecial(url) {
-  try { const u = new URL(url); return u.protocol === 'divo:' && ['newtab','settings','dino','extensions'].includes(u.hostname) }
+  try { const u = new URL(url); return u.protocol === 'divo:' && ['newtab','settings','dino'].includes(u.hostname) }
   catch { return !url }
 }
 function isNewtab(url)   { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'newtab'   } catch { return !url } }
 function isSettings(url)    { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'settings'   } catch { return false } }
 function isDino(url)        { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'dino'       } catch { return false } }
-function isExtensions(url)  { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'extensions' } catch { return false } }
 function displayUrl(url) { return isSpecial(url) ? '' : url }
 
 function getActiveTabs()   { return tabs.filter(t => t.spaceId === activeSpaceId && !t.archived) }
@@ -553,7 +544,7 @@ function wireWebviewEvents(el) {
 
   el.addEventListener('dom-ready', () => {
     el.__ready = true
-    if (el === wv()) { webviewReady = true; updateNavButtons(); notifyExtTabActivated() }
+    if (el === wv()) { webviewReady = true; updateNavButtons() }
     const domUrl = el.getURL()
     if (!domUrl || domUrl === 'about:blank') return
     // Empêcher les sites de détecter qu'ils sont en arrière-plan (évite YouTube qui se met en pause)
@@ -637,7 +628,6 @@ function wireWebviewEvents(el) {
         const hp  = localStorage.getItem('divo-homepage')      || 'newtab'
         const ss  = localStorage.getItem('divo-save-session')  || 'yes'
         const aa  = localStorage.getItem('divo-auto-archive')  || 'off'
-        const ab  = await window.bridge.adblockStatus()
         const wdm = await window.bridge.webDarkModeStatus()
         const hu  = await window.bridge.httpsUpgradeStatus()
         const isDefault = await window.bridge.isDefaultBrowser()
@@ -647,7 +637,6 @@ function wireWebviewEvents(el) {
           document.getElementById('homepage').value         = ${JSON.stringify(hp)};
           document.getElementById('save-session').value     = ${JSON.stringify(ss)};
           document.getElementById('auto-archive').value     = ${JSON.stringify(aa)};
-          document.getElementById('adblock-toggle').checked = ${!!ab};
           const wdt = document.getElementById('web-dark-toggle');
           if (wdt) wdt.checked = ${!!wdm};
           const hut = document.getElementById('https-upgrade-toggle');
@@ -687,18 +676,6 @@ function wireWebviewEvents(el) {
       }, 300)
     }
 
-    // Initialisation extensions — injecter la liste via executeJavaScript
-    if (isExtensions(e.url)) {
-      setTimeout(async () => {
-        const exts = await window.bridge.getUserExtensions()
-        if (!el.__ready) return
-        el.executeJavaScript(`
-          window.__divoExts = ${JSON.stringify(exts)};
-          if (typeof window.__divoRefresh === 'function') window.__divoRefresh(${JSON.stringify(exts)});
-        `).catch(() => {})
-      }, 150)
-    }
-
     if (el !== wv()) return
     syncUrlBars(displayUrl(e.url))
     globalPlaying = false; updateMuteBtn(); updateNavButtons()
@@ -720,34 +697,9 @@ function wireWebviewEvents(el) {
   el.addEventListener('page-title-updated', e => {
     const currentUrl = el.getURL()
 
-    // Installation extension — autorisée depuis CWS uniquement (pas n'importe quelle page)
-    if (e.title.startsWith('divo-action:install-extension:')) {
-      try { if (new URL(currentUrl).hostname !== 'chromewebstore.google.com' && !isSpecial(currentUrl)) return } catch { return }
-      const extId = e.title.split(':')[2]
-      if (/^[a-z]{32}$/.test(extId)) {
-        window.bridge.installExtById(extId).then(async res => {
-          if (res.ok) {
-            // Rafraîchir la page extensions si déjà ouverte, sinon l'ouvrir
-            const extWebview = [...pageWebviews.values()].find(v => { try { return isExtensions(v.getURL()) } catch { return false } })
-            if (extWebview && extWebview.__ready) {
-              const exts = await window.bridge.getUserExtensions()
-              extWebview.executeJavaScript(`if(window.__divoRefresh)window.__divoRefresh(${JSON.stringify(exts)});if(window.__divoToast)window.__divoToast(${JSON.stringify('"' + (res.name||extId) + '" installée')}, 'ok')`).catch(() => {})
-              activateTab(tabs.find(t => isExtensions(t.url))?.id)
-            } else {
-              createTab('divo://extensions')
-            }
-          } else if (res.reason) {
-            alert('Erreur d\'installation : ' + res.reason)
-          }
-        })
-      }
-      return
-    }
-
     if (e.title.startsWith('divo-action:')) {
       if (isSpecial(currentUrl)) {
         const action = e.title.replace('divo-action:', '')
-        if (action.startsWith('adblock:'))           window.bridge.adblockToggle(action.endsWith('true'))
         if (action.startsWith('theme:'))              applyTheme(action.replace('theme:', ''))
         if (action.startsWith('layout:'))             applyLayout(action.replace('layout:', ''))
         if (action.startsWith('web-dark:'))           window.bridge.webDarkModeToggle(action.endsWith('true'))
@@ -769,25 +721,8 @@ function wireWebviewEvents(el) {
       if (isSettings(currentUrl)) window.bridge.setDefaultBrowser()
       return
     }
-    if (e.title === 'divo-settings-action:open-extensions') {
-      if (isSettings(currentUrl)) createTab('divo://extensions')
-      return
-    }
     if (e.title === 'divo-settings-action:open-secret') {
       if (isSettings(currentUrl)) createTab('divo://secret')
-      return
-    }
-    if (e.title === 'divo-ext-action:open-cws') {
-      createTab('https://chromewebstore.google.com/')
-      return
-    }
-    if (e.title.startsWith('divo-ext-action:toggle:')) {
-      const parts = e.title.split(':')
-      window.bridge.toggleUserExtension(parts[2], parts[3] === 'true')
-      return
-    }
-    if (e.title.startsWith('divo-ext-action:remove:')) {
-      window.bridge.removeUserExtension(e.title.split(':')[2])
       return
     }
     if (e.title.startsWith('divo-settings-action:check-update') && isSettings(currentUrl)) {
@@ -953,7 +888,6 @@ function navigate(url, preserveContent = false) {
 
   // Afficher uniquement le webview de cet onglet, cacher tous les autres
   for (const [k, v] of pageWebviews) v.style.display = k === key ? '' : 'none'
-  notifyExtTabActivated()
 
   const wvEl = pageWebviews.get(key)
   if (wvEl) {
@@ -3128,31 +3062,6 @@ if (savedWidth) { sidebar.style.width = savedWidth + 'px'; sidebar.style.minWidt
 
 window.bridge.onFullscreenChange(isFS => document.body.classList.toggle('fullscreen', isFS))
 window.bridge.onOpenNewTab(url => { if (url) createTab(url) })
-
-// ── Pont chrome.tabs/windows pour les extensions (uBlock Origin, etc.)
-window.bridge.onExtCreateTab(({ requestId, url, active }) => {
-  createTab(url || null)
-  const id = activeTabId
-  const wvEl = pageWebviews.get(id)
-  const send = () => {
-    try { window.bridge.extCreateTabResult(requestId, wvEl.getWebContentsId()) }
-    catch { setTimeout(send, 50) }
-  }
-  if (wvEl?.__ready) send()
-  else wvEl?.addEventListener('dom-ready', send, { once: true })
-})
-
-window.bridge.onExtRemoveTab(webContentsId => {
-  for (const [tabId, wvEl] of pageWebviews) {
-    try { if (wvEl.getWebContentsId() === webContentsId) { closeTab(tabId); break } } catch {}
-  }
-})
-
-window.bridge.onExtSelectTab(webContentsId => {
-  for (const [tabId, wvEl] of pageWebviews) {
-    try { if (wvEl.getWebContentsId() === webContentsId) { activateTab(tabId); break } } catch {}
-  }
-})
 
 loadState(); loadHistory(); loadSessions(); loadPasswords(); render(); startArchiveTimer(); startScrollSaver()
 setInterval(autoSuspendCheck, 5 * 60 * 1000)
