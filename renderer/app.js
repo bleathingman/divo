@@ -630,6 +630,8 @@ function wireWebviewEvents(el) {
         const aa  = localStorage.getItem('divo-auto-archive')  || 'off'
         const wdm = await window.bridge.webDarkModeStatus()
         const hu  = await window.bridge.httpsUpgradeStatus()
+        const ab  = await window.bridge.adblockStatus()
+        const abStats = await window.bridge.adblockStats()
         const isDefault = await window.bridge.isDefaultBrowser()
         const activeProfile = await window.bridge.getActiveProfile()
         el.executeJavaScript(`(function(){
@@ -641,6 +643,10 @@ function wireWebviewEvents(el) {
           if (wdt) wdt.checked = ${!!wdm};
           const hut = document.getElementById('https-upgrade-toggle');
           if (hut) hut.checked = ${!!hu};
+          const abt = document.getElementById('adblock-toggle');
+          if (abt) abt.checked = ${!!ab};
+          const abDesc = document.getElementById('adblock-desc');
+          if (abDesc) abDesc.textContent = 'Bloque les pubs et trackers (CSS + listes de filtres) — ' + ${abStats.blocked} + ' requêtes bloquées';
           const defBtn = document.getElementById('default-browser-btn');
           const defStatus = document.getElementById('default-browser-status');
           if (defBtn && defStatus) {
@@ -704,6 +710,7 @@ function wireWebviewEvents(el) {
         if (action.startsWith('layout:'))             applyLayout(action.replace('layout:', ''))
         if (action.startsWith('web-dark:'))           window.bridge.webDarkModeToggle(action.endsWith('true'))
         if (action.startsWith('https-upgrade:'))      window.bridge.httpsUpgradeToggle(action.endsWith('true'))
+        if (action.startsWith('adblock:'))            window.bridge.adblockToggle(action.endsWith('true'))
         if (action.startsWith('pick-download-path')) {
           window.bridge.pickDownloadPath().then(newPath => {
             if (!newPath || !el.__ready) return

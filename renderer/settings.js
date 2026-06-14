@@ -32,6 +32,9 @@ document.getElementById('btn-pick-download').addEventListener('click', function(
 document.getElementById('web-dark-toggle').addEventListener('change', function() {
   document.title = 'divo-action:web-dark:' + this.checked
 })
+document.getElementById('adblock-toggle').addEventListener('change', function() {
+  document.title = 'divo-action:adblock:' + this.checked
+})
 document.getElementById('https-upgrade-toggle').addEventListener('change', function() {
   document.title = 'divo-action:https-upgrade:' + this.checked
 })

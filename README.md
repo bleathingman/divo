@@ -46,7 +46,7 @@ sudo pacman -S gtk3 nss libxss libxtst xdg-utils
 | **Favoris** | Bookmarks par space, import Chrome / Edge / Firefox |
 | **Auto-archive** | Onglets inactifs archivés automatiquement |
 | **Déchargement d'onglets** | Libère la RAM, position de scroll sauvegardée |
-| **Bloqueur de pubs** | uBlock Origin installé et activé automatiquement |
+| **Bloqueur de pubs** | Moteur intégré : ~280 000 domaines + filtres cosmétiques EasyList |
 | **Navigation privée** | Session isolée, aucun historique conservé |
 | **Mode sombre web** | Thème sombre appliqué automatiquement sur tous les sites |
 | **Boutons souris** | Boutons 4 / 5 pour reculer / avancer |
