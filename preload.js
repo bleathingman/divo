@@ -4,7 +4,6 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron')
 const __divoInitState     = ipcRenderer.sendSync('state-load-sync')
 const __divoInitHistory   = ipcRenderer.sendSync('history-load-sync')
 const __divoInitSessions  = ipcRenderer.sendSync('sessions-load-sync')
-const __divoInitPasswords = ipcRenderer.sendSync('passwords-load-sync')
 
 contextBridge.exposeInMainWorld('bridge', {
   minimize:             () => ipcRenderer.send('window-minimize'),
@@ -49,8 +48,11 @@ contextBridge.exposeInMainWorld('bridge', {
   historySave:  (h) => ipcRenderer.invoke('history-save', h),
   initSessions:   __divoInitSessions,
   sessionsSave:   (s) => ipcRenderer.invoke('sessions-save', s),
-  initPasswords:  __divoInitPasswords,
-  passwordsSave:  (p) => ipcRenderer.invoke('passwords-save', p),
+  passwordsGet:     ()                   => ipcRenderer.invoke('passwords-get'),
+  passwordAutofill: (id, wcId)           => ipcRenderer.invoke('password-autofill', id, wcId),
+  passwordCopy:     (id)                 => ipcRenderer.invoke('password-copy', id),
+  passwordSave:     (d, url, us, pw)     => ipcRenderer.invoke('password-save', d, url, us, pw),
+  passwordDelete:   (id)                 => ipcRenderer.invoke('password-delete', id),
   captureTab:          (id) => ipcRenderer.invoke('capture-tab', id),
   stateSave: (s)   => ipcRenderer.invoke('state-save', s),
   rendererLog: (msg) => ipcRenderer.send('renderer-log', msg),

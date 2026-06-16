@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dialog, net } = require('electron')
+const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dialog, net, safeStorage, clipboard } = require('electron')
 const path = require('path')
 const fs   = require('fs')
 const crypto = require('crypto')
@@ -121,14 +121,38 @@ const PASSWORDS_PATH = path.join(app.getPath('userData'), 'passwords.json')
 let _vaultKey = null
 function getVaultKey() {
   if (_vaultKey) return _vaultKey
-  try {
-    const hex = fs.readFileSync(VAULT_KEY_PATH, 'utf-8').trim()
-    _vaultKey = Buffer.from(hex, 'hex')
-    if (_vaultKey.length !== 32) throw new Error('bad key length')
-  } catch {
-    _vaultKey = crypto.randomBytes(32)
-    try { fs.writeFileSync(VAULT_KEY_PATH, _vaultKey.toString('hex'), 'utf-8') } catch {}
+  if (!safeStorage.isEncryptionAvailable()) {
+    // Headless fallback (Linux sans keyring) — comportement identique à l'ancien
+    try {
+      const hex = fs.readFileSync(VAULT_KEY_PATH, 'utf-8').trim()
+      _vaultKey = Buffer.from(hex, 'hex')
+      if (_vaultKey.length !== 32) throw new Error('bad key length')
+    } catch {
+      _vaultKey = crypto.randomBytes(32)
+      try { fs.writeFileSync(VAULT_KEY_PATH, _vaultKey.toString('hex'), 'utf-8') } catch {}
+    }
+    return _vaultKey
   }
+  try {
+    const data = fs.readFileSync(VAULT_KEY_PATH)
+    try {
+      // Format actuel : Buffer chiffré par safeStorage (DPAPI/Keychain)
+      const hex = safeStorage.decryptString(data)
+      _vaultKey = Buffer.from(hex, 'hex')
+      if (_vaultKey.length !== 32) throw new Error('bad length')
+      return _vaultKey
+    } catch {}
+    // Migration depuis l'ancien format : hex en clair
+    const hex = data.toString('utf-8').trim()
+    if (/^[0-9a-f]{64}$/i.test(hex)) {
+      _vaultKey = Buffer.from(hex, 'hex')
+      try { fs.writeFileSync(VAULT_KEY_PATH, safeStorage.encryptString(hex)) } catch {}
+      return _vaultKey
+    }
+  } catch {}
+  // Première utilisation : générer et stocker chiffré
+  _vaultKey = crypto.randomBytes(32)
+  try { fs.writeFileSync(VAULT_KEY_PATH, safeStorage.encryptString(_vaultKey.toString('hex'))) } catch {}
   return _vaultKey
 }
 function encryptPwd(plain) {
@@ -150,15 +174,77 @@ function decryptPwd(enc) {
   } catch { return '' }
 }
 let cachedPasswords = []
-try {
-  cachedPasswords = JSON.parse(fs.readFileSync(PASSWORDS_PATH, 'utf-8'))
-    .map(e => ({ ...e, password: decryptPwd(e.password) }))
-} catch {}
+function loadPasswordsFromDisk() {
+  // Appelé depuis app.whenReady() — safeStorage est disponible
+  try {
+    cachedPasswords = JSON.parse(fs.readFileSync(PASSWORDS_PATH, 'utf-8'))
+      .map(e => ({ ...e, password: decryptPwd(e.password) }))
+  } catch { cachedPasswords = [] }
+}
 function writePasswords(entries) {
   try { fs.writeFileSync(PASSWORDS_PATH, JSON.stringify(entries.map(e => ({ ...e, password: encryptPwd(e.password) })))) } catch {}
 }
-ipcMain.on('passwords-load-sync', e => { e.returnValue = cachedPasswords })
-ipcMain.handle('passwords-save', (_, entries) => { cachedPasswords = entries; writePasswords(entries) })
+function pwMeta(e) {
+  return { id: e.id, domain: e.domain, username: e.username, url: e.url, createdAt: e.createdAt, lastUsed: e.lastUsed, updatedAt: e.updatedAt }
+}
+
+// ── IPC passwords — les mots de passe déchiffrés ne quittent jamais le main process
+ipcMain.handle('passwords-get', () => cachedPasswords.map(pwMeta))
+
+ipcMain.handle('password-autofill', async (_, id, wcId) => {
+  const entry = cachedPasswords.find(p => p.id === id)
+  if (!entry) return false
+  try {
+    const wc = webContents.fromId(wcId)
+    if (!wc || wc.isDestroyed()) return false
+    const u = JSON.stringify(entry.username), p = JSON.stringify(entry.password)
+    await wc.executeJavaScript(`(function(){
+      const u=${u},p=${p}
+      function fill(el,v){if(!el)return;const d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');d.set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
+      const uField=document.querySelector('input[type="email"],input[autocomplete*="username"],input[autocomplete*="email"],input[name*="user"],input[name*="email"],input[name*="login"]')||[...document.querySelectorAll('input[type="text"]')].find(i=>i.offsetParent)
+      const pField=document.querySelector('input[type="password"]')
+      fill(uField,u);fill(pField,p)
+    })()`)
+    entry.lastUsed = Date.now()
+    writePasswords(cachedPasswords)
+    return true
+  } catch { return false }
+})
+
+ipcMain.handle('password-copy', (_, id) => {
+  const entry = cachedPasswords.find(p => p.id === id)
+  if (!entry) return false
+  clipboard.writeText(entry.password)
+  entry.lastUsed = Date.now()
+  writePasswords(cachedPasswords)
+  return true
+})
+
+ipcMain.handle('password-save', (_, domain, url, username, password) => {
+  if (typeof domain !== 'string' || !domain || domain.length > 255) return { ok: false }
+  if (typeof username !== 'string' || !username || username.length > 500) return { ok: false }
+  if (typeof password !== 'string' || !password || password.length > 1000) return { ok: false }
+  if (typeof url !== 'string' || url.length > 2048) return { ok: false }
+  const idx = cachedPasswords.findIndex(p => p.domain === domain && p.username === username)
+  let entry
+  if (idx >= 0) {
+    cachedPasswords[idx].password  = password
+    cachedPasswords[idx].updatedAt = Date.now()
+    entry = cachedPasswords[idx]
+  } else {
+    entry = { id: 'pw' + Date.now(), domain, url, username, password, createdAt: Date.now(), lastUsed: 0 }
+    cachedPasswords.unshift(entry)
+  }
+  writePasswords(cachedPasswords)
+  return { ok: true, entry: pwMeta(entry) }
+})
+
+ipcMain.handle('password-delete', (_, id) => {
+  if (typeof id !== 'string' || id.length > 50) return false
+  cachedPasswords = cachedPasswords.filter(p => p.id !== id)
+  writePasswords(cachedPasswords)
+  return true
+})
 
 // ── Aperçu des onglets
 ipcMain.handle('capture-tab', async (_, wcId) => {
@@ -1271,6 +1357,7 @@ ipcMain.on('peek-promote', (e, url) => {
 })
 
 app.whenReady().then(async () => {
+  loadPasswordsFromDisk()
   initBlocklist()
   setupWebRequestFilters()
   setupCsp()

@@ -1653,12 +1653,8 @@ function getDomain(url) {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
 }
 
-function loadPasswords() {
-  passwordsData = window.bridge.initPasswords || []
-}
-
-function savePasswords() {
-  window.bridge.passwordsSave(passwordsData)
+async function loadPasswords() {
+  passwordsData = await window.bridge.passwordsGet()
 }
 
 function getPasswordsForUrl(url) {
@@ -1670,19 +1666,21 @@ function getPasswordsForUrl(url) {
 function addOrUpdatePassword(url, username, password) {
   if (!username || !password) return
   const domain = getDomain(url) || url.replace(/^https?:\/\//, '').split('/')[0]
-  const idx = passwordsData.findIndex(p => p.domain === domain && p.username === username)
-  if (idx >= 0) {
-    passwordsData[idx].password  = password
-    passwordsData[idx].updatedAt = Date.now()
-  } else {
-    passwordsData.unshift({ id: 'pw' + Date.now(), domain, url, username, password, createdAt: Date.now(), lastUsed: 0 })
-  }
-  savePasswords(); renderPasswords()
+  window.bridge.passwordSave(domain, url, username, password).then(r => {
+    if (!r?.ok) return
+    const idx = passwordsData.findIndex(p => p.domain === domain && p.username === username)
+    if (idx >= 0) passwordsData[idx] = r.entry
+    else passwordsData.unshift(r.entry)
+    renderPasswords()
+  })
 }
 
 function deletePassword(id) {
-  passwordsData = passwordsData.filter(p => p.id !== id)
-  savePasswords(); renderPasswords()
+  window.bridge.passwordDelete(id).then(ok => {
+    if (!ok) return
+    passwordsData = passwordsData.filter(p => p.id !== id)
+    renderPasswords()
+  })
 }
 
 function renderPasswords(filter) {
@@ -1745,21 +1743,10 @@ function hidePasswordAddForm() {
   document.getElementById('pw-pwd-input').value  = ''
 }
 
-// Autofill — injecter identifiants dans le formulaire de la page active
+// Autofill — le main injecte directement dans le webview, le mot de passe ne transite pas par le renderer chrome
 async function doAutofill(cred) {
   const el = wv(); if (!el?.__ready || !cred) return
-  try {
-    const u = JSON.stringify(cred.username), p = JSON.stringify(cred.password)
-    await el.executeJavaScript(`(function(){
-      const u=${u}, p=${p}
-      function fill(el,v){if(!el)return;const d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');d.set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
-      const uField=document.querySelector('input[type="email"],input[autocomplete*="username"],input[autocomplete*="email"],input[name*="user"],input[name*="email"],input[name*="login"]')||[...document.querySelectorAll('input[type="text"]')].find(i=>i.offsetParent)
-      const pField=document.querySelector('input[type="password"]')
-      fill(uField,u); fill(pField,p)
-    })()`)
-    const entry = passwordsData.find(pw => pw.id === cred.id)
-    if (entry) { entry.lastUsed = Date.now(); savePasswords() }
-  } catch {}
+  await window.bridge.passwordAutofill(cred.id, el.getWebContentsId()).catch(() => {})
   autofillBar.classList.remove('visible')
 }
 
@@ -2680,14 +2667,15 @@ document.getElementById('passwords-search').addEventListener('input', e => rende
 document.getElementById('passwords-list').addEventListener('click', async e => {
   const btn = e.target.closest('[data-pw-action]'); if (!btn) return
   const id = btn.dataset.id
-  const entry = passwordsData.find(p => p.id === id); if (!entry) return
   switch (btn.dataset.pwAction) {
-    case 'autofill':
+    case 'autofill': {
+      const entry = passwordsData.find(p => p.id === id); if (!entry) return
       closePasswordsPanel()
       await doAutofill(entry)
       break
+    }
     case 'copy-pwd':
-      try { await navigator.clipboard.writeText(entry.password) } catch {}
+      await window.bridge.passwordCopy(id).catch(() => {})
       btn.style.color = '#34c759'
       setTimeout(() => { btn.style.color = '' }, 1200)
       break
