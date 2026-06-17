@@ -2001,10 +2001,11 @@ body.light .ctx-color-swatch.active { border-color: #1c1c1e; box-shadow: 0 0 0 1
 
 .top-nav-bar {
   display: none;
+  position: relative;
   align-items: center;
   gap: 2px;
   padding: 0 8px;
-  background: #252526;
+  background: #1c1c1e;
   flex-shrink: 0;
   height: 42px;
   -webkit-app-region: drag
@@ -2012,24 +2013,29 @@ body.light .ctx-color-swatch.active { border-color: #1c1c1e; box-shadow: 0 0 0 1
 body.layout-top .top-nav-bar { display: flex }
 .top-nav-bar .nav-btn { -webkit-app-region: no-drag; color: #858585 }
 .top-nav-bar .nav-btn:hover:not([disabled]) { background: rgba(255,255,255,.07); color: #cccccc }
+#top-btn-mute { margin-left: auto }
 
 .top-url-bar {
-  flex: 1 !important;
-  height: 28px !important;
-  font-size: 13px !important;
-  border-radius: 4px !important;
-  max-width: 660px;
-  background: #3c3c3c !important;
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: min(594px, 60%) !important;
+  height: 25px !important;
+  font-size: 11.7px !important;
+  padding: 5px 9px !important;
+  border-radius: 6px !important;
+  background: #252527 !important;
   border-color: transparent !important;
-  color: #cccccc !important;
+  color: #f5f5f7 !important;
   -webkit-app-region: no-drag
 }
 .top-url-bar:focus {
-  border-color: #0a84ff !important;
-  background: #3c3c3c !important;
-  box-shadow: none !important
+  border-color: transparent !important;
+  background: #323235 !important;
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, .4) !important
 }
-.top-url-bar::placeholder { color: #6a6a6a !important }
+.top-url-bar::placeholder { color: #48484a !important }
 
 .top-tab-bar {
   display: none;
@@ -2129,13 +2135,17 @@ body.layout-top .sidebar .nav-row { display: none }
 body.layout-top .sidebar .tabs-section { display: none }
 body.layout-top .sidebar .archive-section { display: none !important }
 
+/* Mode hybride : barre URL en haut, onglets restent dans la sidebar */
+body.layout-topurl .top-nav-bar { display: flex }
+body.layout-topurl .sidebar .nav-row { display: none }
+
 /* Light + top */
-body.light .top-nav-bar { background: #f3f3f3 }
+body.light .top-nav-bar { background: #f2f2f7 }
 body.light .top-nav-bar .nav-btn { color: #717171 }
 body.light .top-nav-bar .nav-btn:hover:not([disabled]) { background: rgba(0,0,0,.06); color: #333 }
-body.light .top-url-bar { background: #ffffff !important; border-color: #cecece !important; color: #333 !important }
-body.light .top-url-bar:focus { border-color: #0a84ff !important }
-body.light .top-url-bar::placeholder { color: #aaa !important }
+body.light .top-url-bar { background: #e5e5ea !important; border-color: transparent !important; color: #1c1c1e !important }
+body.light .top-url-bar:focus { background: #ffffff !important; box-shadow: 0 0 0 2px rgba(10, 132, 255, .45) !important }
+body.light .top-url-bar::placeholder { color: #aeaeb2 !important }
 body.light .top-tab-bar { background: #ececec; border-bottom-color: #d4d4d4 }
 body.light .top-tab { background: #e0e0e0; color: #777777; border-right-color: #d4d4d4 }
 body.light .top-tab:hover { background: #e8e8e8; color: #444 }

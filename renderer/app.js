@@ -464,7 +464,7 @@ function loadState() {
   const savedTheme = localStorage.getItem('divo-theme')
   if (savedTheme === 'light') applyTheme('light')
   const savedLayout = localStorage.getItem('divo-layout')
-  if (savedLayout) { currentLayout = savedLayout; document.body.classList.toggle('layout-top', savedLayout === 'top') }
+  if (savedLayout) { currentLayout = savedLayout; applyLayoutClasses(savedLayout) }
 }
 
 function syncUrlBars(val) {
@@ -488,9 +488,14 @@ function renderTopTabs() {
   topTabsList.replaceChildren(frag)
 }
 
+function applyLayoutClasses(layout) {
+  document.body.classList.toggle('layout-top', layout === 'top')
+  document.body.classList.toggle('layout-topurl', layout === 'topurl')
+}
+
 function applyLayout(layout) {
   currentLayout = layout
-  document.body.classList.toggle('layout-top', layout === 'top')
+  applyLayoutClasses(layout)
   localStorage.setItem('divo-layout', layout)
   renderTabs()
 }
@@ -2452,7 +2457,7 @@ function handleShortcut(mod, shift, alt, code) {
   if (mod && shift && code === 'KeyT') { restoreClosedTab(); return true }
   if (mod && shift && code === 'KeyN') { createTab(null, true); return true }
   if (mod && code === 'KeyW') { if (!activeEssentialId && activeTabId) closeTab(activeTabId); return true }
-  if (mod && code === 'KeyL') { const inp = currentLayout === 'top' ? topUrlInput : urlInput; setTimeout(() => { wv().blur(); inp.focus(); inp.select() }, 50); return true }
+  if (mod && code === 'KeyL') { const inp = currentLayout !== 'sidebar' ? topUrlInput : urlInput; setTimeout(() => { wv().blur(); inp.focus(); inp.select() }, 50); return true }
   if (mod && code === 'KeyR') { if (webviewReady) shift ? wv().reloadIgnoringCache() : wv().reload(); return true }
   if (mod && code === 'KeyF') { setTimeout(() => { wv().blur(); openFind() }, 50); return true }
   if (mod && code === 'KeyK') { openPalette(); return true }
@@ -3207,7 +3212,7 @@ favoritesList.addEventListener('drop', e => {
     { type:'action', title:'Mode focus',                 icon:'focus',      kbd:'F8',       run:() => toggleFocusMode() },
     { type:'action', title:'Outils développeur',         icon:'devtools',   kbd:'F12',      run:() => { if (webviewReady) wv().openDevTools() } },
     { type:'action', title:'Épingler en Essential',      icon:'pin',        kbd:'Ctrl+D',   run:() => addCurrentPageAsEssential() },
-    { type:'action', title:'Focus barre URL',            icon:'url',        kbd:'Ctrl+L',   run:() => { const inp = currentLayout === 'top' ? topUrlInput : urlInput; inp.focus(); inp.select() } },
+    { type:'action', title:'Focus barre URL',            icon:'url',        kbd:'Ctrl+L',   run:() => { const inp = currentLayout !== 'sidebar' ? topUrlInput : urlInput; inp.focus(); inp.select() } },
   ]
 
   const ICONS = {
