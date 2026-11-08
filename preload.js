@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webFrame } = require('electron')
+const { contextBridge, ipcRenderer } = require('electron')
 
 // Chargé synchronement avant que app.js tourne — élimine tout problème de timing
 const __divoInitState     = ipcRenderer.sendSync('state-load-sync')

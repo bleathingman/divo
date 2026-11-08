@@ -1,3 +1,4 @@
+/* global openPalette, closePalette */ // exposées plus bas via window.*
 // ============================================================
 // DIVO BROWSER — renderer/app.js
 // ============================================================
@@ -603,7 +604,8 @@ function wireWebviewEvents(el) {
     }
     if (!isSpecial(url)) {
       const tab = tabs.find(t => t.id === el.__key)
-      addToHistory(url, el.getTitle(), tab?.favicon || null)
+      // tab = l'onglet de CETTE webview (peut être en arrière-plan) — addToHistory ne regarde que l'onglet actif
+      if (!tab?.private) addToHistory(url, el.getTitle(), tab?.favicon || null)
       if (tab?._resumeScroll && tab.scrollY > 0) {
         tab._resumeScroll = false
         const y = Math.round(tab.scrollY)

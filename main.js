@@ -2,12 +2,31 @@ const { app, BrowserWindow, ipcMain, protocol, webContents, shell, session, dial
 const path = require('path')
 const fs   = require('fs')
 const crypto = require('crypto')
+const { pathToFileURL } = require('url')
 
 // ── Crash logging
 const LOG_PATH = path.join(app.getPath('userData'), 'crash.log')
 function writeLog(msg) {
   try { fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${msg}\n`) } catch {}
 }
+
+// Écriture atomique : fichier temporaire puis rename. Un crash / une coupure pendant l'écriture
+// laisse l'ancien fichier intact au lieu d'un JSON tronqué (perte d'onglets, config, mots de passe).
+function writeFileAtomic(file, data, encoding) {
+  const tmp = file + '.tmp'
+  fs.writeFileSync(tmp, data, encoding)
+  fs.renameSync(tmp, file)
+}
+// Copie de sécurité horodatée avant une opération qui rendrait un fichier irrécupérable
+function backupFile(file, reason) {
+  try {
+    if (!fs.existsSync(file)) return
+    const bak = `${file}.bak-${Date.now()}`
+    fs.copyFileSync(file, bak)
+    writeLog(`backup ${path.basename(file)} → ${path.basename(bak)} (${reason})`)
+  } catch {}
+}
+
 process.on('uncaughtException', e => { writeLog('uncaughtException: ' + e.stack); throw e })
 process.on('unhandledRejection', (reason) => { writeLog('unhandledRejection: ' + reason) })
 
@@ -23,6 +42,50 @@ app.commandLine.appendSwitch('disable-background-timer-throttling')
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 
 let mainWindow
+let rendererReady = false
+
+// ── Instance unique : un lien/fichier ouvert depuis une autre app (Divo navigateur par défaut)
+// arrive dans un nouvel onglet de la fenêtre existante au lieu de lancer un 2e Divo.
+if (!app.requestSingleInstanceLock()) app.exit(0)
+
+const OPENABLE_FILE_RE = /\.(html?|xhtml|shtml|xht)$/i
+function urlFromArgv(argv) {
+  for (const arg of argv.slice(1)) {
+    if (!arg || arg.startsWith('-')) continue
+    if (/^https?:\/\//i.test(arg)) return arg
+    if (OPENABLE_FILE_RE.test(arg)) {
+      try { const p = path.resolve(arg); if (fs.existsSync(p)) return pathToFileURL(p).href } catch {}
+    }
+  }
+  return null
+}
+
+// URLs reçues avant que la fenêtre principale soit prête (lancement à froid, sélecteur de profil, open-url macOS)
+const pendingOpenUrls = []
+function openUrlInNewTab(url) {
+  if (!url) return
+  if (rendererReady && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('open-new-tab', url)
+  else pendingOpenUrls.push(url)
+}
+openUrlInNewTab(urlFromArgv(process.argv))
+
+app.on('second-instance', (_, argv) => {
+  const win = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : profileSelectorWin
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore()
+    win.show(); win.focus()
+  }
+  openUrlInNewTab(urlFromArgv(argv))
+})
+// macOS : liens et fichiers transmis par le système
+app.on('open-url',  (e, url) => { e.preventDefault(); if (/^https?:\/\//i.test(url)) openUrlInNewTab(url) })
+app.on('open-file', (e, p)   => { e.preventDefault(); if (OPENABLE_FILE_RE.test(p)) openUrlInNewTab(pathToFileURL(p).href) })
+
+// Relance (changement de profil, import) sans les URLs/fichiers du lancement initial — sinon rouverts
+function relaunchApp() {
+  app.relaunch({ args: process.argv.slice(1).filter(a => !urlFromArgv(['', a])) })
+}
+
 const downloadItems = new Map()
 const pendingPerms  = new Map()
 const peekWindows   = new Set()
@@ -46,7 +109,8 @@ const ADBLOCK_NEVER_BLOCK = new Set([
 
 // SEC-009/110 — valide toute <webview> attachée (fenêtre principale et popups "Peek") :
 // src, partition et webPreferences forcés, peu importe ce que la page demande.
-const WEBVIEW_ALLOWED_PROTOS = new Set(['http:', 'https:', 'divo:', 'about:'])
+// file: requis pour ouvrir les .html locaux (association de fichiers / argv)
+const WEBVIEW_ALLOWED_PROTOS = new Set(['http:', 'https:', 'divo:', 'about:', 'file:'])
 const WEBVIEW_ALLOWED_PARTITIONS = /^(persist:divo|private:incognito)$/
 function attachWebviewSecurity(webContents) {
   webContents.on('will-attach-webview', (e, webPreferences, params) => {
@@ -99,17 +163,17 @@ let pendingProfileSelectResolve = null
 let profileSelectorWin = null
 
 function profileDir(id) { return path.join(PROFILES_DIR, id || activeProfileId) }
-function saveProfilesIndex() { try { fs.writeFileSync(PROFILES_INDEX, JSON.stringify(profilesIndex)) } catch {} }
+function saveProfilesIndex() { try { writeFileAtomic(PROFILES_INDEX, JSON.stringify(profilesIndex)) } catch {} }
 
 // ── Config persistante (par profil)
 let config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
 function saveConfig() {
-  try { fs.writeFileSync(path.join(profileDir(), 'config.json'), JSON.stringify(config)) } catch (e) { console.error('saveConfig error', e) }
+  try { writeFileAtomic(path.join(profileDir(), 'config.json'), JSON.stringify(config)) } catch (e) { console.error('saveConfig error', e) }
 }
 
 // ── État navigateur persistant (par profil)
 let cachedAppState = null
-function writeAppState(s) { try { fs.writeFileSync(path.join(profileDir(), 'state.json'), JSON.stringify(s)) } catch {} }
+function writeAppState(s) { try { writeFileAtomic(path.join(profileDir(), 'state.json'), JSON.stringify(s)) } catch {} }
 
 ipcMain.handle('state-load', () => cachedAppState)
 ipcMain.handle('state-save', (_, s) => { cachedAppState = s; writeAppState(s) })
@@ -128,8 +192,9 @@ function getVaultKey() {
       _vaultKey = Buffer.from(hex, 'hex')
       if (_vaultKey.length !== 32) throw new Error('bad key length')
     } catch {
+      backupVaultBeforeNewKey('clé illisible (sans keyring)')
       _vaultKey = crypto.randomBytes(32)
-      try { fs.writeFileSync(VAULT_KEY_PATH, _vaultKey.toString('hex'), 'utf-8') } catch {}
+      try { writeFileAtomic(VAULT_KEY_PATH, _vaultKey.toString('hex'), 'utf-8') } catch {}
     }
     return _vaultKey
   }
@@ -146,14 +211,21 @@ function getVaultKey() {
     const hex = data.toString('utf-8').trim()
     if (/^[0-9a-f]{64}$/i.test(hex)) {
       _vaultKey = Buffer.from(hex, 'hex')
-      try { fs.writeFileSync(VAULT_KEY_PATH, safeStorage.encryptString(hex)) } catch {}
+      try { writeFileAtomic(VAULT_KEY_PATH, safeStorage.encryptString(hex)) } catch {}
       return _vaultKey
     }
   } catch {}
-  // Première utilisation : générer et stocker chiffré
+  // Première utilisation (ou clé indéchiffrable) : générer et stocker chiffré.
+  // Si une clé existait, on la sauvegarde avec passwords.json : sinon ils seraient perdus à jamais.
+  backupVaultBeforeNewKey('clé indéchiffrable')
   _vaultKey = crypto.randomBytes(32)
-  try { fs.writeFileSync(VAULT_KEY_PATH, safeStorage.encryptString(_vaultKey.toString('hex'))) } catch {}
+  try { writeFileAtomic(VAULT_KEY_PATH, safeStorage.encryptString(_vaultKey.toString('hex'))) } catch {}
   return _vaultKey
+}
+function backupVaultBeforeNewKey(reason) {
+  if (!fs.existsSync(VAULT_KEY_PATH)) return   // vraie première utilisation
+  backupFile(VAULT_KEY_PATH, reason)
+  backupFile(PASSWORDS_PATH, reason)
 }
 function encryptPwd(plain) {
   try {
@@ -176,13 +248,20 @@ function decryptPwd(enc) {
 let cachedPasswords = []
 function loadPasswordsFromDisk() {
   // Appelé depuis app.whenReady() — safeStorage est disponible
+  if (!fs.existsSync(PASSWORDS_PATH)) { cachedPasswords = []; return }
   try {
-    cachedPasswords = JSON.parse(fs.readFileSync(PASSWORDS_PATH, 'utf-8'))
-      .map(e => ({ ...e, password: decryptPwd(e.password) }))
-  } catch { cachedPasswords = [] }
+    const raw = JSON.parse(fs.readFileSync(PASSWORDS_PATH, 'utf-8'))
+    cachedPasswords = raw.map(e => ({ ...e, password: decryptPwd(e.password) }))
+    // Entrées chiffrées devenues illisibles → garder une copie avant que la prochaine écriture
+    // ne les remplace par des mots de passe vides
+    if (raw.some((e, i) => e.password && !cachedPasswords[i].password)) backupFile(PASSWORDS_PATH, 'déchiffrement partiel')
+  } catch {
+    backupFile(PASSWORDS_PATH, 'fichier illisible')
+    cachedPasswords = []
+  }
 }
 function writePasswords(entries) {
-  try { fs.writeFileSync(PASSWORDS_PATH, JSON.stringify(entries.map(e => ({ ...e, password: encryptPwd(e.password) })))) } catch {}
+  try { writeFileAtomic(PASSWORDS_PATH, JSON.stringify(entries.map(e => ({ ...e, password: encryptPwd(e.password) })))) } catch {}
 }
 function pwMeta(e) {
   return { id: e.id, domain: e.domain, username: e.username, url: e.url, createdAt: e.createdAt, lastUsed: e.lastUsed, updatedAt: e.updatedAt }
@@ -196,7 +275,16 @@ ipcMain.handle('password-autofill', async (_, id, wcId) => {
   if (!entry) return false
   try {
     const wc = webContents.fromId(wcId)
-    if (!wc || wc.isDestroyed()) return false
+    if (!wc || wc.isDestroyed() || wc.getType() !== 'webview') return false
+    // Ne jamais remplir un identifiant sur un autre site que le sien (anti-phishing) —
+    // même règle de correspondance que getPasswordsForUrl() côté renderer.
+    let host = ''
+    try { host = new URL(wc.getURL()).hostname.replace(/^www\./, '').toLowerCase() } catch {}
+    const d = String(entry.domain || '').toLowerCase()
+    if (!host || !d || !(host === d || host.endsWith('.' + d) || d.endsWith('.' + host))) {
+      writeLog(`password-autofill refusé : ${d} ≠ ${host}`)
+      return false
+    }
     const u = JSON.stringify(entry.username), p = JSON.stringify(entry.password)
     await wc.executeJavaScript(`(function(){
       const u=${u},p=${p}
@@ -258,7 +346,7 @@ ipcMain.handle('capture-tab', async (_, wcId) => {
 
 // ── Sessions nommées (par profil)
 let cachedSessions = []
-function writeSessions(s) { try { fs.writeFileSync(path.join(profileDir(), 'sessions.json'), JSON.stringify(s)) } catch {} }
+function writeSessions(s) { try { writeFileAtomic(path.join(profileDir(), 'sessions.json'), JSON.stringify(s)) } catch {} }
 
 ipcMain.handle('sessions-save', (_, s) => { cachedSessions = s; writeSessions(s) })
 ipcMain.on('sessions-load-sync', e => { e.returnValue = cachedSessions })
@@ -267,7 +355,7 @@ ipcMain.on('sessions-load-sync', e => { e.returnValue = cachedSessions })
 const historyPath = path.join(app.getPath('userData'), 'history.json')
 let cachedHistory = []
 try { cachedHistory = JSON.parse(fs.readFileSync(historyPath, 'utf-8')) } catch {}
-function writeHistory(h) { try { fs.writeFileSync(historyPath, JSON.stringify(h)) } catch {} }
+function writeHistory(h) { try { writeFileAtomic(historyPath, JSON.stringify(h)) } catch {} }
 
 // ── Chargement d'un profil
 function loadProfileData(id) {
@@ -373,7 +461,7 @@ ipcMain.handle('ps-get-data', () => ({ profiles: profilesIndex.profiles, isFirst
 ipcMain.handle('ps-select', (_, id) => {
   if (mainWindow) {
     try { fs.writeFileSync(LAUNCH_PROFILE_FILE, id) } catch {}
-    app.relaunch(); app.exit(0)
+    relaunchApp(); app.exit(0)
     return { ok: true }
   }
   loadProfileData(id)
@@ -387,11 +475,11 @@ ipcMain.handle('ps-create', (_, data) => {
   const id = 'p' + Date.now()
   try { fs.mkdirSync(profileDir(id), { recursive: true }) } catch {}
   profilesIndex.profiles.push({ id, name: data.name||'Profil', emoji: data.emoji||'\u{1F3E0}', image: data.image||null, color: data.color||'#0a84ff' })
-  if (data.presetKey) { const st = makePresetState(data.presetKey); if (st) try { fs.writeFileSync(path.join(profileDir(id),'state.json'), JSON.stringify(st)) } catch {} }
+  if (data.presetKey) { const st = makePresetState(data.presetKey); if (st) try { writeFileAtomic(path.join(profileDir(id),'state.json'), JSON.stringify(st)) } catch {} }
   if (mainWindow) {
     saveProfilesIndex()
     try { fs.writeFileSync(LAUNCH_PROFILE_FILE, id) } catch {}
-    app.relaunch(); app.exit(0)
+    relaunchApp(); app.exit(0)
     return { ok: true }
   }
   loadProfileData(id)
@@ -466,9 +554,18 @@ const BL_COSMETIC_FILE = path.join(BL_DIR, `bl_${BL_VER}_cosmetic.json`)
 const BL_TTL = 7 * 24 * 60 * 60 * 1000
 
 let blockedDomains     = new Set()
-let cosmeticGenericCSS = ''           // sélecteurs CSS génériques (sans déclaration)
+let cosmeticGenericCSS = ''           // CSS générique prêt à injecter (une règle par sélecteur)
 const cosmeticByDomain = new Map()    // "example.com" → ["#ad", ".banner", …]
 const adblockStats = { blocked: 0 }
+
+// Helpers d'injection — tests sur le hostname (un includes() sur l'URL matchait aussi
+// "evil.com/?q=youtube.com")
+function isInjectableUrl(url) {
+  return !!url && url !== 'about:blank' && !url.startsWith('chrome') && !url.startsWith('arc') && !url.startsWith('file')
+}
+function hostOf(url) { try { return new URL(url).hostname.toLowerCase() } catch { return '' } }
+function onHost(host, d) { return host === d || host.endsWith('.' + d) }
+function isYouTubeHost(host) { return onHost(host, 'youtube.com') || onHost(host, 'youtu.be') }
 
 // Renvoie true si hostname (ou un domaine parent) est dans la blocklist, sauf whitelist
 function isBlockedHostname(hostname) {
@@ -526,7 +623,7 @@ function parseAbpList(text, domainSet, genericSels, domainSels, parseNetRules = 
       let rule = line
       if (line.includes('$')) rule = line.slice(0, line.lastIndexOf('$'))
       if (rule.startsWith('||')) {
-        const inner = rule.slice(2).split(/[\^\/\?]/)[0].toLowerCase()
+        const inner = rule.slice(2).split(/[\^/?]/)[0].toLowerCase()
         if (inner && inner.includes('.') && /^[a-z0-9._-]+$/.test(inner)) domainSet.add(inner)
       }
     }
@@ -542,8 +639,15 @@ function getPageCosmeticCSS(hostname) {
     const rules = cosmeticByDomain.get(parts.slice(i).join('.'))
     if (rules) sels.push(...rules)
   }
-  return sels.length ? sels.join(',\n') + ' { display: none !important; }' : ''
+  return hideCSS(sels)
 }
+
+// Une règle par sélecteur : avec "a, b, c { … }", Chromium ignore la règle ENTIÈRE dès qu'un
+// seul sélecteur lui est inconnu — un sélecteur exotique d'EasyList désactivait tout le cosmétique.
+function hideCSS(sels) {
+  return sels.map(s => s + '{display:none!important}').join('\n')
+}
+const COSMETIC_GENERIC_MAX = 6000
 
 async function refreshFilterLists() {
   try {
@@ -557,7 +661,13 @@ async function refreshFilterLists() {
       net.fetch('https://easylist.to/easylist/easylist.txt')
     ])
 
-    if (domRes.status === 'fulfilled' && domRes.value.ok) {
+    const domOk = domRes.status === 'fulfilled' && domRes.value.ok
+    const elOk  = elRes.status  === 'fulfilled' && elRes.value.ok
+    // Hors ligne / serveur indisponible : garder le cache plutôt qu'écrire une liste vide
+    // (qui aurait désactivé l'adblock jusqu'au prochain refresh, 7 jours plus tard)
+    if (!domOk && !elOk) { writeLog('[adblock] listes indisponibles, cache conservé'); return }
+
+    if (domOk) {
       const text = await domRes.value.text()
       for (const line of text.split('\n')) {
         const t = line.trim()
@@ -567,24 +677,24 @@ async function refreshFilterLists() {
       }
     }
 
-    if (elRes.status === 'fulfilled' && elRes.value.ok) {
+    if (elOk) {
       // parseNetRules=false : on utilise EasyList pour les cosmétiques uniquement,
       // OISD couvre déjà le blocage réseau sans risquer des faux-positifs Google/CDN
       parseAbpList(await elRes.value.text(), newDomains, newGeneric, newByDomain, false)
     }
 
-    // Sauvegarde
-    fs.writeFileSync(BL_DOMAINS_FILE, [...newDomains].join('\n'), 'utf-8')
-    fs.writeFileSync(BL_COSMETIC_FILE, JSON.stringify({
-      generic:  newGeneric.slice(0, 6000),
-      byDomain: Object.fromEntries(newByDomain)
-    }), 'utf-8')
-
-    // Application immédiate
-    blockedDomains     = newDomains
-    cosmeticGenericCSS = newGeneric.slice(0, 6000).join(',\n')
-    cosmeticByDomain.clear()
-    for (const [k, v] of newByDomain) cosmeticByDomain.set(k, v)
+    // Sauvegarde + application — uniquement les listes effectivement téléchargées
+    if (domOk) {
+      writeFileAtomic(BL_DOMAINS_FILE, [...newDomains].join('\n'), 'utf-8')
+      blockedDomains = newDomains
+    }
+    if (elOk) {
+      const generic = newGeneric.slice(0, COSMETIC_GENERIC_MAX)
+      writeFileAtomic(BL_COSMETIC_FILE, JSON.stringify({ generic, byDomain: Object.fromEntries(newByDomain) }), 'utf-8')
+      cosmeticGenericCSS = hideCSS(generic)
+      cosmeticByDomain.clear()
+      for (const [k, v] of newByDomain) cosmeticByDomain.set(k, v)
+    }
 
     console.log(`[adblock] ${blockedDomains.size} domaines, ${cosmeticByDomain.size} règles cosmétiques domaine`)
   } catch (e) { console.error('[adblock] refresh error', e) }
@@ -600,7 +710,7 @@ function initBlocklist() {
   if (fs.existsSync(BL_COSMETIC_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(BL_COSMETIC_FILE, 'utf-8'))
-      cosmeticGenericCSS = (data.generic || []).join(',\n')
+      cosmeticGenericCSS = hideCSS((data.generic || []).slice(0, COSMETIC_GENERIC_MAX))
       for (const [k, v] of Object.entries(data.byDomain || {})) cosmeticByDomain.set(k, v)
     } catch {}
   }
@@ -661,8 +771,10 @@ function setupCsp() {
         // Nos pages internes : CSP stricte
         return cspHandler(details, callback)
       }
-      // Pages externes : retirer require-trusted-types-for pour que les content scripts
-      // d'extensions puissent injecter des scripts (ex: bloqueurs de pubs sur YouTube)
+      // YouTube uniquement : retirer require-trusted-types-for pour que page-preload.js puisse
+      // injecter son patch anti-pub (<script>.textContent). Partout ailleurs on garde cette
+      // protection anti-XSS des sites intacte.
+      if (!isYouTubeHost(hostOf(url))) { callback({}); return }
       const headers = { ...details.responseHeaders }
       for (const key of Object.keys(headers)) {
         if (key.toLowerCase() === 'content-security-policy') {
@@ -874,6 +986,7 @@ const TWITCH_AD_JS = `(function(){
 
 // ── Web dark mode dynamique (inspiré Dark Reader)
 function dynamicDark() {
+  /* global document, window, MutationObserver */ // exécutée dans la page (via toString), pas dans le main
   'use strict'
   if (document.getElementById('__dv_dm')) return
 
@@ -1236,8 +1349,13 @@ function createWindow() {
     try { session.fromPartition(partition).protocol.handle('divo', makeDivoHandler()) } catch {}
   }
 
+  rendererReady = false
   mainWindow.loadFile('renderer/index.html')
   mainWindow.once('ready-to-show', () => mainWindow.show())
+  mainWindow.webContents.once('did-finish-load', () => {
+    rendererReady = true
+    for (const u of pendingOpenUrls.splice(0)) mainWindow.webContents.send('open-new-tab', u)
+  })
 
   // Sauvegarde synchrone de l'état avant fermeture
   let closing = false
@@ -1365,11 +1483,13 @@ app.whenReady().then(async () => {
   // ── Téléchargements — appliqués sur toutes les sessions (persist:divo + private:incognito)
   const safeFilename = raw =>
     path.basename(String(raw || 'download'))
+      // eslint-disable-next-line no-control-regex -- caractères de contrôle volontairement filtrés
       .replace(/[\x00-\x1f<>"'/\\|?*]/g, '_')
       .slice(0, 200) || 'download'
 
+  let dlSeq = 0
   const willDownloadHandler = (_, item) => {
-    const id = Date.now()
+    const id = Date.now() * 1000 + (dlSeq++ % 1000)   // unique même pour 2 téléchargements dans la même ms
     const dlDir = config.downloadPath || app.getPath('downloads')
     const filename = safeFilename(item.getFilename())
     item.setSavePath(path.join(dlDir, filename))
@@ -1418,7 +1538,10 @@ app.whenReady().then(async () => {
       if (PERM_AUTO_ALLOW.has(permission)) { callback(true);  return }
       if (PERM_AUTO_DENY.has(permission))  { callback(false); return }
       const key = Date.now() + '-' + Math.random()
-      pendingPerms.set(key, callback)
+      // settle() ne répond qu'une fois ; refus automatique si l'onglet est fermé avant la réponse
+      const settle = granted => { if (pendingPerms.delete(key)) callback(!!granted) }
+      pendingPerms.set(key, settle)
+      wc.once('destroyed', () => settle(false))
       mainWindow.webContents.send('permission-request', {
         key,
         permission,
@@ -1457,38 +1580,35 @@ app.whenReady().then(async () => {
         }
       })
 
+      // dom-ready (avant le rendu complet) : le CSS cosmétique est posé avant que les pubs
+      // ne s'affichent — avec did-finish-load elles apparaissaient une fraction de seconde.
       contents.on('dom-ready', () => {
         if (!config.adblock) return
         const url = contents.getURL()
-        if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+        if (!isInjectableUrl(url) || url.startsWith('divo:')) return
+        const host = hostOf(url)
+        // CSS génériques (curatés + EasyList)
+        contents.insertCSS(GENERIC_AD_CSS).catch(() => {})
+        if (cosmeticGenericCSS) contents.insertCSS(cosmeticGenericCSS).catch(() => {})
+        // CSS cosmétiques spécifiques au domaine
+        const domCSS = host && getPageCosmeticCSS(host)
+        if (domCSS) contents.insertCSS(domCSS).catch(() => {})
+        if (isYouTubeHost(host)) {
           contents.executeJavaScript(YT_EARLY_JS).catch(() => {})
+          contents.insertCSS(YT_AD_CSS).catch(() => {})
         }
+        if (onHost(host, 'twitch.tv')) contents.insertCSS(TWITCH_AD_CSS).catch(() => {})
       })
 
       contents.on('did-finish-load', () => {
         const url = contents.getURL()
-        if (!url || url === 'about:blank' || url.startsWith('chrome') || url.startsWith('arc') || url.startsWith('file')) return
+        if (!isInjectableUrl(url)) return
+        const host = hostOf(url)
 
         if (config.adblock && !url.startsWith('divo:')) {
-          // CSS génériques (curatés + EasyList)
-          contents.insertCSS(GENERIC_AD_CSS).catch(() => {})
-          if (cosmeticGenericCSS) {
-            contents.insertCSS(cosmeticGenericCSS + ' { display: none !important; }').catch(() => {})
-          }
-          // CSS cosmétiques spécifiques au domaine
-          try {
-            const domCSS = getPageCosmeticCSS(new URL(url).hostname)
-            if (domCSS) contents.insertCSS(domCSS).catch(() => {})
-          } catch {}
-          // Sites spécifiques
-          if (url.includes('youtube.com') || url.includes('youtu.be')) {
-            contents.insertCSS(YT_AD_CSS).catch(() => {})
-            contents.executeJavaScript(YT_AD_JS).catch(() => {})
-          }
-          if (url.includes('twitch.tv')) {
-            contents.insertCSS(TWITCH_AD_CSS).catch(() => {})
-            contents.executeJavaScript(TWITCH_AD_JS).catch(() => {})
-          }
+          // Scripts anti-pub : besoin du DOM complet (lecteur vidéo)
+          if (isYouTubeHost(host))      contents.executeJavaScript(YT_AD_JS).catch(() => {})
+          if (onHost(host, 'twitch.tv')) contents.executeJavaScript(TWITCH_AD_JS).catch(() => {})
         }
 
         // Boutons souris 4 (retour) et 5 (avant) — injectés dans chaque page
@@ -1512,7 +1632,7 @@ app.whenReady().then(async () => {
       // Navigation SPA : re-injecter YouTube + dark mode
       contents.on('did-navigate-in-page', (_, url, isMainFrame) => {
         if (!isMainFrame || !url || url.startsWith('divo:')) return
-        if (config.adblock && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+        if (config.adblock && isYouTubeHost(hostOf(url))) {
           // Pas de ré-insertion de YT_AD_CSS ici : le CSS posé au did-finish-load
           // persiste à travers les navigations SPA (même document) — le réinjecter
           // à chaque vidéo empilait une feuille de style supplémentaire à chaque
@@ -1644,8 +1764,7 @@ ipcMain.on('open-file', (_, p) => {
 ipcMain.on('open-dl-folder',     () => shell.openPath(config.downloadPath || app.getPath('downloads')))
 ipcMain.on('focus-webview',      (_, id) => { const wc = webContents.fromId(id); if (wc) wc.focus() })
 ipcMain.on('answer-permission',  (_, key, granted) => {
-  const cb = pendingPerms.get(key)
-  if (cb) { cb(granted); pendingPerms.delete(key) }
+  pendingPerms.get(key)?.(granted)
 })
 
 ipcMain.handle('is-default-browser', () => app.isDefaultProtocolClient('https') || app.isDefaultProtocolClient('http'))
@@ -1664,7 +1783,11 @@ ipcMain.handle('set-default-browser', async () => {
   app.setAsDefaultProtocolClient('https')
   return true
 })
-ipcMain.handle('set-theme', (_, theme) => { config.theme = theme; saveConfig() })
+ipcMain.handle('set-theme', (_, theme) => {
+  // Valeur réinjectée dans un attribut HTML des pages divo:// — liste fermée
+  if (theme !== 'dark' && theme !== 'light') return
+  config.theme = theme; saveConfig()
+})
 
 // ── Téléchargements IPC
 ipcMain.handle('get-download-path', () => config.downloadPath || app.getPath('downloads'))
@@ -1823,8 +1946,18 @@ ipcMain.handle('profile-import', async () => {
     if (profile.state)    { cachedAppState = profile.state;    writeAppState(profile.state) }
     if (profile.history)  { cachedHistory  = profile.history;  writeHistory(profile.history) }
     if (profile.sessions) { cachedSessions = profile.sessions; writeSessions(profile.sessions) }
-    if (profile.config)   { Object.assign(config, profile.config); saveConfig() }
-    app.relaunch()
+    // Seuls les réglages d'apparence/confort sont importés. Jamais allowedExternalProtos
+    // (un fichier piégé pourrait autoriser l'ouverture silencieuse de protocoles dangereux)
+    // ni downloadPath (chemin d'une autre machine / dossier arbitraire).
+    if (profile.config && typeof profile.config === 'object') {
+      const c = profile.config
+      if (typeof c.adblock      === 'boolean') config.adblock      = c.adblock
+      if (typeof c.webDarkMode  === 'boolean') config.webDarkMode  = c.webDarkMode
+      if (typeof c.httpsUpgrade === 'boolean') config.httpsUpgrade = c.httpsUpgrade
+      if (c.theme === 'dark' || c.theme === 'light') config.theme = c.theme
+      saveConfig()
+    }
+    relaunchApp()
     app.exit(0)
     return { ok: true }
   } catch (e) {
