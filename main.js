@@ -1939,11 +1939,23 @@ ipcMain.handle('import-chrome-bookmarks', async () => {
   })
   if (response !== 1) return []
 
-  const browsers = [
+  // Dossiers de profils Chromium par plateforme
+  const home = app.getPath('home')
+  const browsers = process.platform === 'win32' ? [
     { name: 'Chrome',   base: path.join(process.env.LOCALAPPDATA || '', 'Google',         'Chrome',        'User Data') },
     { name: 'Edge',     base: path.join(process.env.LOCALAPPDATA || '', 'Microsoft',      'Edge',          'User Data') },
     { name: 'Brave',    base: path.join(process.env.LOCALAPPDATA || '', 'BraveSoftware',  'Brave-Browser', 'User Data') },
     { name: 'Chromium', base: path.join(process.env.LOCALAPPDATA || '', 'Chromium',       'Chromium',      'User Data') },
+  ] : process.platform === 'darwin' ? [
+    { name: 'Chrome',   base: path.join(home, 'Library', 'Application Support', 'Google', 'Chrome') },
+    { name: 'Edge',     base: path.join(home, 'Library', 'Application Support', 'Microsoft Edge') },
+    { name: 'Brave',    base: path.join(home, 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser') },
+    { name: 'Chromium', base: path.join(home, 'Library', 'Application Support', 'Chromium') },
+  ] : [
+    { name: 'Chrome',   base: path.join(home, '.config', 'google-chrome') },
+    { name: 'Edge',     base: path.join(home, '.config', 'microsoft-edge') },
+    { name: 'Brave',    base: path.join(home, '.config', 'BraveSoftware', 'Brave-Browser') },
+    { name: 'Chromium', base: path.join(home, '.config', 'chromium') },
   ]
 
   function flattenNode(node, out) {

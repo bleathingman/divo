@@ -51,7 +51,6 @@ const tabsList      = document.getElementById('tabs-list')
 const archiveList      = document.getElementById('archive-list')
 const archiveSection   = document.getElementById('archive-section')
 const favoritesList    = document.getElementById('favorites-list')
-const favoritesSection = document.getElementById('favorites-section')
 const spacesList    = document.getElementById('spaces-list')
 const contextMenu   = document.getElementById('context-menu')
 const progressBar   = document.getElementById('progress-bar')
@@ -305,7 +304,6 @@ let currentLayout   = 'sidebar'
 // HELPERS
 // ============================================================
 
-function stripSlash(u) { return (u || '').replace(/\/+$/, '') }
 // Comparaison stricte sur le protocole divo: — les includes() sur .html étaient bypassables
 // par n'importe quelle page externe hébergée à une URL contenant "newtab.html" etc.
 function isSpecial(url) {
@@ -314,7 +312,6 @@ function isSpecial(url) {
 }
 function isNewtab(url)   { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'newtab'   } catch { return !url } }
 function isSettings(url)    { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'settings'   } catch { return false } }
-function isDino(url)        { try { const u = new URL(url); return u.protocol === 'divo:' && u.hostname === 'dino'       } catch { return false } }
 function displayUrl(url) { return isSpecial(url) ? '' : url }
 
 function getActiveTabs()   { return tabs.filter(t => t.spaceId === activeSpaceId && !t.archived) }
@@ -3215,6 +3212,7 @@ favoritesList.addEventListener('drop', e => {
     { type:'action', title:'Mode focus',                 icon:'focus',      kbd:'F8',       run:() => toggleFocusMode() },
     { type:'action', title:'Outils développeur',         icon:'devtools',   kbd:'F12',      run:() => { if (webviewReady) wv().openDevTools() } },
     { type:'action', title:'Épingler en Essential',      icon:'pin',        kbd:'Ctrl+D',   run:() => addCurrentPageAsEssential() },
+    { type:'action', title:'Importer les favoris Chrome / Edge / Brave', icon:'downloads', kbd:'', run:() => importChromeBookmarks() },
     { type:'action', title:'Focus barre URL',            icon:'url',        kbd:'Ctrl+L',   run:() => { const inp = currentLayout !== 'sidebar' ? topUrlInput : urlInput; inp.focus(); inp.select() } },
   ]
 
