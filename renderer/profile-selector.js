@@ -229,7 +229,9 @@ async function confirmDelete() {
   if (!deleteTargetId) return
   const id = deleteTargetId
   closeConfirm()
-  await window.profileBridge.del(id)
+  const res = await window.profileBridge.del(id)
+  if (res && !res.ok && res.reason === 'active')
+    alert('Ce profil est en cours d\'utilisation. Ouvrez un autre profil avant de le supprimer.')
   const d = await window.profileBridge.getData()
   profiles = d.profiles
   renderProfiles()

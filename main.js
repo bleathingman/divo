@@ -111,7 +111,6 @@ const ADBLOCK_NEVER_BLOCK = new Set([
 // src, partition et webPreferences forcés, peu importe ce que la page demande.
 // file: requis pour ouvrir les .html locaux (association de fichiers / argv)
 const WEBVIEW_ALLOWED_PROTOS = new Set(['http:', 'https:', 'divo:', 'about:', 'file:'])
-const WEBVIEW_ALLOWED_PARTITIONS = /^(persist:divo|private:incognito)$/
 function attachWebviewSecurity(webContents) {
   webContents.on('will-attach-webview', (e, webPreferences, params) => {
     // Vérifier que l'URL initiale utilise un scheme autorisé (bloque file://, data:, etc.)
@@ -123,10 +122,9 @@ function attachWebviewSecurity(webContents) {
       } catch { e.preventDefault(); return }
     }
 
-    // Forcer la partition à une valeur attendue (ignore l'attribut HTML partition="...")
-    if (!WEBVIEW_ALLOWED_PARTITIONS.test(params.partition || '')) {
-      params.partition = 'persist:divo'
-    }
+    // Partition imposée par le main (ignore l'attribut HTML partition="...") :
+    // navigation privée, sinon la partition du profil actif — c'est ce qui isole les profils.
+    params.partition = params.partition === 'private:incognito' ? 'private:incognito' : activePartition()
 
     // Figer toutes les webPreferences (écrase tout attribut webpreferences="...")
     delete webPreferences.preload
@@ -164,6 +162,66 @@ let profileSelectorWin = null
 
 function profileDir(id) { return path.join(PROFILES_DIR, id || activeProfileId) }
 function saveProfilesIndex() { try { writeFileAtomic(PROFILES_INDEX, JSON.stringify(profilesIndex)) } catch {} }
+
+// ── Isolation des profils
+// Chaque profil a sa propre partition Chromium (cookies, comptes connectés, localStorage /
+// IndexedDB des sites, cache), son propre historique et ses propres mots de passe.
+// La partition est mémorisée dans profiles.json (champ "partition") : elle ne change jamais,
+// même si l'ordre des profils change ou qu'un autre profil est supprimé.
+const LEGACY_PARTITION = 'persist:divo'
+function partitionForNewProfile(id) {
+  return 'persist:divo-' + String(id).toLowerCase().replace(/[^a-z0-9_-]/g, '')
+}
+function activePartition() {
+  return profilesIndex.profiles.find(p => p.id === activeProfileId)?.partition || LEGACY_PARTITION
+}
+function partitionDir(partition) {
+  return path.join(app.getPath('userData'), 'Partitions', partition.replace(/^persist:/, ''))
+}
+function historyFile()   { return activeProfileId ? path.join(profileDir(), 'history.json')   : LEGACY_HISTORY_PATH }
+function passwordsFile() { return activeProfileId ? path.join(profileDir(), 'passwords.json') : PASSWORDS_PATH }
+
+// Contenu d'une partition qui n'est que du cache (régénéré au besoin) — jamais copié
+const PARTITION_CACHE_ENTRIES = new Set(['Cache', 'Code Cache', 'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache',
+  'Shared Dictionary', 'VideoDecodeStats', 'blob_storage'])
+function copyPartitionData(fromPartition, toPartition) {
+  const src = partitionDir(fromPartition), dst = partitionDir(toPartition)
+  if (!fs.existsSync(src) || fs.existsSync(dst)) return
+  const swCaches = [path.join('Service Worker', 'CacheStorage'), path.join('Service Worker', 'ScriptCache')]
+  try {
+    fs.cpSync(src, dst, {
+      recursive: true,
+      filter: s => {
+        const rel = path.relative(src, s)
+        if (!rel) return true
+        if (PARTITION_CACHE_ENTRIES.has(rel.split(path.sep)[0])) return false
+        return !swCaches.some(c => rel === c || rel.startsWith(c + path.sep))
+      },
+    })
+    writeLog(`partition copiée : ${fromPartition} → ${toPartition}`)
+  } catch (e) { writeLog(`copie partition ${toPartition} échouée : ${e.message}`) }
+}
+
+// Migration (< 5.3.0) : tous les profils partageaient persist:divo + historique et mots de passe
+// globaux. Le premier profil garde persist:divo tel quel ; chaque autre profil existant reçoit une
+// COPIE des connexions / historique / mots de passe actuels (personne n'est déconnecté), puis
+// chacun évolue séparément. Les profils créés ensuite démarrent vierges.
+function migrateProfileIsolation() {
+  const pending = profilesIndex.profiles.filter(p => !p.partition)
+  if (!pending.length) return
+  let legacyTaken = profilesIndex.profiles.some(p => p.partition === LEGACY_PARTITION)
+  for (const p of pending) {
+    try { fs.mkdirSync(profileDir(p.id), { recursive: true }) } catch {}
+    if (!legacyTaken) { p.partition = LEGACY_PARTITION; legacyTaken = true }
+    else { p.partition = partitionForNewProfile(p.id); copyPartitionData(LEGACY_PARTITION, p.partition) }
+    for (const [legacy, name] of [[LEGACY_HISTORY_PATH, 'history.json'], [PASSWORDS_PATH, 'passwords.json']]) {
+      const dst = path.join(profileDir(p.id), name)
+      try { if (fs.existsSync(legacy) && !fs.existsSync(dst)) fs.copyFileSync(legacy, dst) } catch {}
+    }
+  }
+  saveProfilesIndex()
+  writeLog(`isolation profils : ${pending.length} profil(s) migré(s)`)
+}
 
 // ── Config persistante (par profil)
 let config = { adblock: true, webDarkMode: false, httpsUpgrade: true }
@@ -225,7 +283,9 @@ function getVaultKey() {
 function backupVaultBeforeNewKey(reason) {
   if (!fs.existsSync(VAULT_KEY_PATH)) return   // vraie première utilisation
   backupFile(VAULT_KEY_PATH, reason)
+  // La clé est commune à tous les profils : sauvegarder les mots de passe de chacun
   backupFile(PASSWORDS_PATH, reason)
+  for (const p of profilesIndex.profiles) backupFile(path.join(profileDir(p.id), 'passwords.json'), reason)
 }
 function encryptPwd(plain) {
   try {
@@ -247,21 +307,21 @@ function decryptPwd(enc) {
 }
 let cachedPasswords = []
 function loadPasswordsFromDisk() {
-  // Appelé depuis app.whenReady() — safeStorage est disponible
-  if (!fs.existsSync(PASSWORDS_PATH)) { cachedPasswords = []; return }
+  // Appelé par loadProfileData(), toujours après app.whenReady() — safeStorage est disponible
+  if (!fs.existsSync(passwordsFile())) { cachedPasswords = []; return }
   try {
-    const raw = JSON.parse(fs.readFileSync(PASSWORDS_PATH, 'utf-8'))
+    const raw = JSON.parse(fs.readFileSync(passwordsFile(), 'utf-8'))
     cachedPasswords = raw.map(e => ({ ...e, password: decryptPwd(e.password) }))
     // Entrées chiffrées devenues illisibles → garder une copie avant que la prochaine écriture
     // ne les remplace par des mots de passe vides
-    if (raw.some((e, i) => e.password && !cachedPasswords[i].password)) backupFile(PASSWORDS_PATH, 'déchiffrement partiel')
+    if (raw.some((e, i) => e.password && !cachedPasswords[i].password)) backupFile(passwordsFile(), 'déchiffrement partiel')
   } catch {
-    backupFile(PASSWORDS_PATH, 'fichier illisible')
+    backupFile(passwordsFile(), 'fichier illisible')
     cachedPasswords = []
   }
 }
 function writePasswords(entries) {
-  try { writeFileAtomic(PASSWORDS_PATH, JSON.stringify(entries.map(e => ({ ...e, password: encryptPwd(e.password) })))) } catch {}
+  try { writeFileAtomic(passwordsFile(), JSON.stringify(entries.map(e => ({ ...e, password: encryptPwd(e.password) })))) } catch {}
 }
 function pwMeta(e) {
   return { id: e.id, domain: e.domain, username: e.username, url: e.url, createdAt: e.createdAt, lastUsed: e.lastUsed, updatedAt: e.updatedAt }
@@ -351,11 +411,11 @@ function writeSessions(s) { try { writeFileAtomic(path.join(profileDir(), 'sessi
 ipcMain.handle('sessions-save', (_, s) => { cachedSessions = s; writeSessions(s) })
 ipcMain.on('sessions-load-sync', e => { e.returnValue = cachedSessions })
 
-// ── Historique (global — partagé entre profils)
-const historyPath = path.join(app.getPath('userData'), 'history.json')
+// ── Historique (par profil — profiles/<id>/history.json)
+// L'ancien fichier global n'est plus lu qu'une fois, par migrateProfileIsolation()
+const LEGACY_HISTORY_PATH = path.join(app.getPath('userData'), 'history.json')
 let cachedHistory = []
-try { cachedHistory = JSON.parse(fs.readFileSync(historyPath, 'utf-8')) } catch {}
-function writeHistory(h) { try { writeFileAtomic(historyPath, JSON.stringify(h)) } catch {} }
+function writeHistory(h) { try { writeFileAtomic(historyFile(), JSON.stringify(h)) } catch {} }
 
 // ── Chargement d'un profil
 function loadProfileData(id) {
@@ -369,6 +429,11 @@ function loadProfileData(id) {
   try { cachedAppState = JSON.parse(fs.readFileSync(path.join(profileDir(id), 'state.json'), 'utf-8')) } catch {}
   cachedSessions = []
   try { cachedSessions = JSON.parse(fs.readFileSync(path.join(profileDir(id), 'sessions.json'), 'utf-8')) } catch {}
+  cachedHistory = []
+  try { cachedHistory = JSON.parse(fs.readFileSync(historyFile(), 'utf-8')) } catch {}
+  loadPasswordsFromDisk()
+  userAllowedProtos.clear()
+  try { for (const p of JSON.parse(config.allowedExternalProtos || '[]')) if (typeof p === 'string') userAllowedProtos.add(p) } catch {}
   profilesIndex.lastUsedId = id
   saveProfilesIndex()
 }
@@ -405,7 +470,7 @@ function makePresetState(key) {
 function initProfiles() {
   try { fs.mkdirSync(PROFILES_DIR, { recursive: true }) } catch {}
   try { profilesIndex = JSON.parse(fs.readFileSync(PROFILES_INDEX, 'utf-8')) } catch {}
-  if (profilesIndex.profiles.length > 0) return false
+  if (profilesIndex.profiles.length > 0) { migrateProfileIsolation(); return false }
   const legacyState    = path.join(app.getPath('userData'), 'state.json')
   const legacyConfig   = path.join(app.getPath('userData'), 'config.json')
   const legacySessions = path.join(app.getPath('userData'), 'sessions.json')
@@ -419,7 +484,7 @@ function initProfiles() {
     } catch {}
     profilesIndex.profiles.push({ id, name:'Mon profil', emoji:'\u{1F3E0}', image:null, color:'#0a84ff' })
     profilesIndex.lastUsedId = id
-    saveProfilesIndex()
+    migrateProfileIsolation()   // → persist:divo + reprise de l'historique / mots de passe globaux
     return false
   }
   return true
@@ -459,6 +524,7 @@ async function showProfileSelectorWindow() {
 ipcMain.handle('ps-get-data', () => ({ profiles: profilesIndex.profiles, isFirstRun: profilesIndex.profiles.length === 0 }))
 
 ipcMain.handle('ps-select', (_, id) => {
+  if (!profilesIndex.profiles.some(p => p.id === id)) return { ok: false }
   if (mainWindow) {
     try { fs.writeFileSync(LAUNCH_PROFILE_FILE, id) } catch {}
     relaunchApp(); app.exit(0)
@@ -474,7 +540,8 @@ ipcMain.handle('ps-select', (_, id) => {
 ipcMain.handle('ps-create', (_, data) => {
   const id = 'p' + Date.now()
   try { fs.mkdirSync(profileDir(id), { recursive: true }) } catch {}
-  profilesIndex.profiles.push({ id, name: data.name||'Profil', emoji: data.emoji||'\u{1F3E0}', image: data.image||null, color: data.color||'#0a84ff' })
+  // Nouveau profil = nouvelle partition vierge (aucun compte connecté, aucun cookie)
+  profilesIndex.profiles.push({ id, name: data.name||'Profil', emoji: data.emoji||'\u{1F3E0}', image: data.image||null, color: data.color||'#0a84ff', partition: partitionForNewProfile(id) })
   if (data.presetKey) { const st = makePresetState(data.presetKey); if (st) try { writeFileAtomic(path.join(profileDir(id),'state.json'), JSON.stringify(st)) } catch {} }
   if (mainWindow) {
     saveProfilesIndex()
@@ -501,10 +568,18 @@ ipcMain.handle('ps-edit', (_, id, data) => {
 ipcMain.handle('ps-delete', (_, id) => {
   if (profilesIndex.profiles.length <= 1) return { ok: false, reason: 'last' }
   const idx = profilesIndex.profiles.findIndex(p => p.id === id); if (idx === -1) return { ok: false }
-  profilesIndex.profiles.splice(idx, 1)
+  // Le profil en cours d'utilisation a sa session ouverte : on ne supprime pas ses fichiers sous lui
+  if (mainWindow && id === activeProfileId) return { ok: false, reason: 'active' }
+  const [removed] = profilesIndex.profiles.splice(idx, 1)
   if (profilesIndex.lastUsedId === id) profilesIndex.lastUsedId = profilesIndex.profiles[0].id
   saveProfilesIndex()
   try { fs.rmSync(profileDir(id), { recursive: true, force: true }) } catch {}
+  // Cookies / données des sites du profil supprimé (jamais la partition historique persist:divo,
+  // ni une partition encore utilisée par un autre profil)
+  const part = removed.partition
+  if (part && part !== LEGACY_PARTITION && !profilesIndex.profiles.some(p => p.partition === part)) {
+    try { fs.rmSync(partitionDir(part), { recursive: true, force: true }) } catch {}
+  }
   return { ok: true }
 })
 
@@ -541,9 +616,10 @@ ipcMain.handle('history-save', (_, h) => { cachedHistory = h; writeHistory(h) })
 ipcMain.on('history-load-sync', e => { e.returnValue = cachedHistory })
 
 // Sessions qui hébergent des webviews — les handlers de sécurité doivent couvrir toutes.
-const PROTECTED_PARTITIONS = ['persist:divo', 'private:incognito']
+// Uniquement la partition du profil actif (+ privée) : à n'appeler qu'une fois le profil chargé.
 function getProtectedSessions() {
-  return [session.defaultSession, ...PROTECTED_PARTITIONS.map(p => session.fromPartition(p))]
+  if (!activeProfileId) throw new Error('getProtectedSessions() appelé avant le choix du profil')
+  return [session.defaultSession, session.fromPartition(activePartition()), session.fromPartition('private:incognito')]
 }
 
 // ── Adblocker (CSS/JS + blocklist réseau)
@@ -1345,7 +1421,7 @@ function createWindow() {
     }
   }
   try { protocol.handle('divo', makeDivoHandler()) } catch {}
-  for (const partition of ['persist:divo', 'private:incognito']) {
+  for (const partition of [activePartition(), 'private:incognito']) {
     try { session.fromPartition(partition).protocol.handle('divo', makeDivoHandler()) } catch {}
   }
 
@@ -1388,7 +1464,8 @@ function createWindow() {
 // ── Ouverture de liens externes avec confirmation pour les protocoles inconnus
 // Protocoles inoffensifs : pas d'args sensibles, dialog inutile
 const ALWAYS_OPEN_PROTOS = new Set(['mailto:', 'tel:', 'sms:', 'callto:'])
-const userAllowedProtos  = new Set(JSON.parse(config.allowedExternalProtos || '[]'))
+// Rempli par loadProfileData() (la config du profil n'est pas encore chargée à ce stade)
+const userAllowedProtos  = new Set()
 // Rate-limiting : 1 dialog par proto par seconde max (anti-spam)
 const lastDialogTime = new Map()
 
@@ -1475,12 +1552,29 @@ ipcMain.on('peek-promote', (e, url) => {
 })
 
 app.whenReady().then(async () => {
-  loadPasswordsFromDisk()
   initBlocklist()
+
+  // ── Choix du profil EN PREMIER : la partition (session) à protéger en dépend.
+  // Le sélecteur n'utilise que la session par défaut (aucune webview).
+  initProfiles()
+  let launchProfileId = null
+  try { launchProfileId = fs.readFileSync(LAUNCH_PROFILE_FILE, 'utf-8').trim(); fs.unlinkSync(LAUNCH_PROFILE_FILE) } catch {}
+  if (launchProfileId) {
+    const lp = profilesIndex.profiles.find(x => x.id === launchProfileId)
+    if (lp) { loadProfileData(lp.id) } else { await showProfileSelectorWindow() }
+  } else if (profilesIndex.profiles.length === 0) {
+    await showProfileSelectorWindow()
+  } else if (profilesIndex.profiles.length === 1) {
+    loadProfileData(profilesIndex.profiles[0].id)
+  } else {
+    await showProfileSelectorWindow()
+  }
+
+  // ── Sessions du profil actif (+ navigation privée) : adblock, CSP, téléchargements, permissions
   setupWebRequestFilters()
   setupCsp()
 
-  // ── Téléchargements — appliqués sur toutes les sessions (persist:divo + private:incognito)
+  // ── Téléchargements — appliqués sur toutes les sessions (profil actif + private:incognito)
   const safeFilename = raw =>
     path.basename(String(raw || 'download'))
       // eslint-disable-next-line no-control-regex -- caractères de contrôle volontairement filtrés
@@ -1682,21 +1776,6 @@ app.whenReady().then(async () => {
       })
     }
   })
-
-  // ── Démarrage avec sélecteur de profils
-  initProfiles()
-  let launchProfileId = null
-  try { launchProfileId = fs.readFileSync(LAUNCH_PROFILE_FILE, 'utf-8').trim(); fs.unlinkSync(LAUNCH_PROFILE_FILE) } catch {}
-  if (launchProfileId) {
-    const lp = profilesIndex.profiles.find(x => x.id === launchProfileId)
-    if (lp) { loadProfileData(lp.id) } else { await showProfileSelectorWindow() }
-  } else if (profilesIndex.profiles.length === 0) {
-    await showProfileSelectorWindow()
-  } else if (profilesIndex.profiles.length === 1) {
-    loadProfileData(profilesIndex.profiles[0].id)
-  } else {
-    await showProfileSelectorWindow()
-  }
 
   createWindow()
 

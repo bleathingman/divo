@@ -535,6 +535,7 @@ function allocWebview(key) {
   el.setAttribute('allowpopups', '')
   el.setAttribute('disableblinkfeatures', 'AuxClick')
   const tab = tabs.find(t => t.id === key)
+  // 'persist:divo' = « session normale » : le main (will-attach-webview) la remplace par la partition du profil actif
   el.setAttribute('partition', tab?.private ? 'private:incognito' : 'persist:divo')
   el.__key   = key
   el.__ready = false
